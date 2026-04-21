@@ -1,0 +1,28 @@
+Write a node-red flow to control the start of household appliances connected to switchable outlets.
+Currently there are only these appliances: a dishwasher, a washing machine and a air conditioner (it does heating in the winter and cooling in the summer)
+
+The goal should be to optimize cost and avoid energy spikes caused by running them in parallel. Also you must make sure that the device runs not later than specified.
+Take also the pv power from the house (4500 W max - check influx db for details) into consideration.
+
+The central elements are outlets connected via mqtt. This outlets measure the current power consumption and can be switched on and off remotely.
+
+Workflow example for a dishwasher:
+
+The user wants to turn on the device and an mqtt command is sent.
+The outlet turns on and the user enters all necessary parameters and the device starts.
+If the power consumption is over a certain limit the state of the device is "in startup".
+
+Now the flow must decide if the device should keep running or cut the power to schedule the run for later.
+
+The output should be the mqtt command to switch on and off the outlet.
+Also the scheduled time for the device and the runtime.
+
+
+You can access the influx database to gather data about the different loads and their power profile.
+
+
+mqtt addresses:
+
+washing machine: z2m/0x70b3d52b6013d856
+dishwasher (tasmota): tm/tele/OgKuGsp
+air condition (tasmota): tm/tele/OgWzKli

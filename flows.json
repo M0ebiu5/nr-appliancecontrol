@@ -1,0 +1,882 @@
+[
+  {
+    "id": "ac_tab",
+    "type": "tab",
+    "label": "Appliance Control",
+    "disabled": false,
+    "info": "Controls dishwasher, washing machine and air conditioner via MQTT-switched\npower outlets. Optimizes for electricity price, avoids grid-import spikes\nand prefers PV self-consumption (4500 Wp array).\n\nReuses existing configs:\n  MQTT broker    mqtt_broker_config (192.168.4.221)\n  InfluxDB live  influxdb_config_infra (measurement pv, field PAC)\n  InfluxDB 2y    influxdb_config_infra_2y (measurement pv, field mean_PAC)\n\nDevice wiring:\n  washing_machine  Zigbee2MQTT  z2m/0x70b3d52b6013d856        payload.power W\n                                z2m/0x70b3d52b6013d856/set    {state:ON|OFF}\n  dishwasher       Tasmota      tm/tele/OgKuGsp/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgKuGsp/POWER         ON|OFF\n  air_conditioner  Tasmota      tm/tele/OgWzKli/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgWzKli/POWER         ON|OFF\n\nUser API (MQTT):\n  home/appliance/<name>/start     JSON {deadline?, estimated_runtime_min?, max_defer_hours?, max_power_w?}\n  home/appliance/<name>/status    retained JSON {state, scheduled_at, runtime_min, reason, ...}\n\nName must be one of: washing_machine, dishwasher, air_conditioner.\n\nPer-appliance defaults (runtime_min, max_defer_hours, max_power_w) live in\n`ac_init_fn` under cfg.appliances.<name>. Any field in the start payload\noverrides the default. If deadline is omitted it is derived from\n`requested_at + max_defer_hours + runtime_min`.\n\nNOTE: Tasmota's default TelePeriod (300s) is too slow for responsive\nstartup detection. Set TelePeriod to ~10s on OgKuGsp and OgWzKli, or the\nscheduler won't see the first power spike for up to five minutes."
+  },
+  {
+    "id": "ac_changelog",
+    "type": "comment",
+    "z": "ac_tab",
+    "name": "=== Changelog ===",
+    "info": "v0.1  2026-04-13  Initial flow: MQTT start API, per-device power monitor, scheduler with hourly PV curve + price forecast, defer/retry, Influx 30s poll for live PV.\nv0.2  2026-04-14  Removed 30s Influx PV poll; live PV now read from global `ess.pac` (shared with battery controller).\nv0.3  2026-04-14  Scheduler rewritten to evaluate candidate starts on a 15-min grid and integrate cost/spike check across the full runtime, matching battery controller v2 slot convention.\nv0.4  2026-04-14  Added this changelog comment node.\nv0.5  2026-04-14  Job state moved from flow-scoped `devices` to `global.jobs`, so other flows can read appliance scheduling state.\nv0.6  2026-04-14  Added in-flow test cases (T1-T4): inject buttons + setup function nodes that exercise ac_scheduler in `_test` mode (no MQTT/state side effects), results to debug sidebar.\nv0.7  2026-04-14  Per-appliance defaults for runtime_min, max_defer_hours, max_power_w in cfg.appliances; start payload fields are now optional and override the defaults; deadline is derived when absent.\nv0.8  2026-04-14  Completed jobs are retained in `global.jobs` under archive keys `<name>#<completed_at>` for 7 days; pruned on each completion and on new start. Active jobs remain keyed by bare name.\nv0.9  2026-04-15  Added in-flow test T5: end-to-end appliance run simulation (start\u2192startup\u2192scheduler\u2192running\u2192completion) with a mock clock and no side effects.",
+    "x": 150,
+    "y": 20,
+    "wires": []
+  },
+  {
+    "id": "ac_init_inject",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "startup",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 130,
+    "y": 60,
+    "wires": [
+      [
+        "ac_init_fn"
+      ]
+    ]
+  },
+  {
+    "id": "ac_init_fn",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "init config",
+    "func": "const cfg = {\n  spike_limit_w: 4000,\n  startup_w: 50,\n  completion_w: 5,\n  completion_dwell_ms: 5 * 60000,\n  price_defer_ratio: 0.85,\n  pv_max_w: 4500,\n  appliances: {\n    washing_machine: { runtime_min: 120, max_defer_hours: 12, max_power_w: 2500 },\n    dishwasher:      { runtime_min: 150, max_defer_hours: 12, max_power_w: 2200 },\n    air_conditioner: { runtime_min:  60, max_defer_hours:  2, max_power_w: 1200 }\n  }\n};\nflow.set('config', cfg);\nif (!global.get('jobs')) global.set('jobs', {});\nif (flow.get('price_now') == null) flow.set('price_now', 0.30);\nif (!flow.get('price_forecast')) flow.set('price_forecast', []);\nif (!flow.get('pv_forecast_by_hour')) flow.set('pv_forecast_by_hour', new Array(24).fill(0));\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 310,
+    "y": 60,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ac_mqtt_in_start",
+    "type": "mqtt in",
+    "z": "ac_tab",
+    "name": "appliance/+/start",
+    "topic": "home/appliance/+/start",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_config",
+    "inputs": 0,
+    "x": 150,
+    "y": 140,
+    "wires": [
+      [
+        "ac_handle_start"
+      ]
+    ]
+  },
+  {
+    "id": "ac_handle_start",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "handle start",
+    "func": "const HISTORY_MS = 7 * 24 * 3600000;\nconst parts = msg.topic.split('/');\nconst name = parts[2];\nconst p = msg.payload || {};\nconst cfg = flow.get('config') || {};\nconst per = (cfg.appliances && cfg.appliances[name]) || {};\nconst runtime_min = Number(p.estimated_runtime_min) || per.runtime_min || 60;\nconst max_defer_hours = Number(p.max_defer_hours) || per.max_defer_hours || 12;\nconst requested_at = Date.now();\nconst deadline = p.deadline != null\n  ? new Date(p.deadline).getTime()\n  : requested_at + (max_defer_hours * 3600000) + (runtime_min * 60000);\nconst jobs = global.get('jobs') || {};\nconst prev = jobs[name];\nif (prev && prev.state === 'completed' && prev.completed_at) {\n  jobs[name + '#' + prev.completed_at] = prev;\n  delete jobs[name];\n}\nconst cutoff = requested_at - HISTORY_MS;\nfor (const k of Object.keys(jobs)) {\n  const j = jobs[k];\n  if (j && j.state === 'completed' && j.completed_at && j.completed_at < cutoff) {\n    delete jobs[k];\n  }\n}\njobs[name] = {\n  name: name,\n  state: 'requested',\n  reason: 'start_requested',\n  predicted_end_at: null,\n  deadline: deadline,\n  estimated_runtime_min: runtime_min,\n  max_defer_hours: max_defer_hours,\n  max_power_w: Number(p.max_power_w) || per.max_power_w || 2500,\n  requested_at: requested_at,\n  last_power: 0,\n  defer_count: 0\n};\nglobal.set('jobs', jobs);\n\nconst switchMsg = { topic: 'home/outlet/' + name + '/set', payload: 'ON' };\nconst statusMsg = {\n  topic: 'home/appliance/' + name + '/status',\n  payload: JSON.stringify({ state: 'requested', reason: 'start_requested', device: name, runtime_min: runtime_min, max_defer_hours: max_defer_hours }),\n  retain: true\n};\nconst influxMsg = {\n  query: \"SELECT percentile(power, 95) FROM outlet_power WHERE device = '\" + name + \"' AND time > now() - 30d\",\n  device_name: name\n};\nreturn [switchMsg, statusMsg, influxMsg];",
+    "outputs": 3,
+    "x": 340,
+    "y": 140,
+    "wires": [
+      [
+        "ac_switch_router"
+      ],
+      [
+        "8cf16d488e45ae65"
+      ],
+      [
+        "ac_profile_query"
+      ]
+    ]
+  },
+  {
+    "id": "ac_profile_query",
+    "type": "influxdb in",
+    "z": "ac_tab",
+    "influxdb": "influxdb_config_infra",
+    "name": "outlet_power percentile",
+    "query": "",
+    "rawOutput": false,
+    "precision": "",
+    "retentionPolicy": "",
+    "x": 570,
+    "y": 200,
+    "wires": [
+      [
+        "ac_update_profile"
+      ]
+    ]
+  },
+  {
+    "id": "ac_update_profile",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "update max_power_w",
+    "func": "const name = msg.device_name;\nif (!name) return null;\nconst jobs = global.get('jobs') || {};\nconst dev = jobs[name];\nif (!dev) return null;\nconst rows = Array.isArray(msg.payload) ? msg.payload : [];\nif (rows.length && rows[0].percentile != null) {\n  dev.max_power_w = Math.max(dev.max_power_w || 0, Math.round(Number(rows[0].percentile)));\n  jobs[name] = dev;\n  global.set('jobs', jobs);\n}\nreturn null;",
+    "outputs": 1,
+    "x": 810,
+    "y": 200,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ac_mqtt_in_wm",
+    "type": "mqtt in",
+    "z": "ac_tab",
+    "d": true,
+    "name": "z2m washing machine",
+    "topic": "z2m/0x70b3d52b6013d856",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_config",
+    "inputs": 0,
+    "x": 160,
+    "y": 240,
+    "wires": [
+      [
+        "ac_power_parse"
+      ]
+    ]
+  },
+  {
+    "id": "ac_mqtt_in_dw",
+    "type": "mqtt in",
+    "z": "ac_tab",
+    "d": true,
+    "name": "tasmota dishwasher SENSOR",
+    "topic": "tm/tele/OgKuGsp/SENSOR",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_config",
+    "inputs": 0,
+    "x": 180,
+    "y": 280,
+    "wires": [
+      [
+        "ac_power_parse"
+      ]
+    ]
+  },
+  {
+    "id": "ac_mqtt_in_ac",
+    "type": "mqtt in",
+    "z": "ac_tab",
+    "name": "tasmota air conditioner SENSOR",
+    "topic": "tm/tele/OgWzKli/SENSOR",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_config",
+    "inputs": 0,
+    "x": 190,
+    "y": 320,
+    "wires": [
+      [
+        "ac_power_parse"
+      ]
+    ]
+  },
+  {
+    "id": "ac_sim_dw_off",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "sim dishwasher OFF (0W)",
+    "props": [
+      {
+        "p": "topic",
+        "vt": "str"
+      },
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "tm/tele/OgKuGsp/SENSOR",
+    "payload": "{\"ENERGY\":{\"Power\":2}}",
+    "payloadType": "json",
+    "x": 190,
+    "y": 460,
+    "wires": [
+      [
+        "ac_power_parse"
+      ]
+    ]
+  },
+  {
+    "id": "ac_sim_dw_startup",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "sim dishwasher STARTUP (120W)",
+    "props": [
+      {
+        "p": "topic",
+        "vt": "str"
+      },
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "tm/tele/OgKuGsp/SENSOR",
+    "payload": "{\"ENERGY\":{\"Power\":120}}",
+    "payloadType": "json",
+    "x": 200,
+    "y": 380,
+    "wires": [
+      [
+        "ac_power_parse"
+      ]
+    ]
+  },
+  {
+    "id": "ac_sim_dw_running",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "sim dishwasher RUNNING (2000W)",
+    "props": [
+      {
+        "p": "topic",
+        "vt": "str"
+      },
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "tm/tele/OgKuGsp/SENSOR",
+    "payload": "{\"ENERGY\":{\"Power\":2000}}",
+    "payloadType": "json",
+    "x": 220,
+    "y": 420,
+    "wires": [
+      [
+        "ac_power_parse"
+      ]
+    ]
+  },
+  {
+    "id": "ac_power_parse",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "parse device power",
+    "func": "const topic = msg.topic || '';\nconst p = msg.payload;\nlet device = null;\nlet power = null;\nif (topic.indexOf('0x70b3d52b6013d856') !== -1) {\n  device = 'washing_machine';\n  if (p && typeof p === 'object' && p.power != null) power = Number(p.power);\n} else if (topic.indexOf('OgKuGsp') !== -1) {\n  device = 'dishwasher';\n  if (p && p.ENERGY && p.ENERGY.Power != null) power = Number(p.ENERGY.Power);\n} else if (topic.indexOf('OgWzKli') !== -1) {\n  device = 'air_conditioner';\n  if (p && p.ENERGY && p.ENERGY.Power != null) power = Number(p.ENERGY.Power);\n}\nif (device == null || power == null || isNaN(power)) return null;\nreturn { topic: 'home/outlet/' + device + '/power', payload: power };",
+    "outputs": 1,
+    "x": 420,
+    "y": 280,
+    "wires": [
+      [
+        "ac_power_monitor",
+        "ac_sim_dw_debug"
+      ]
+    ]
+  },
+  {
+    "id": "ac_power_monitor",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "power monitor",
+    "func": "function localIso(ms){const d=new Date(ms);const pad=n=>String(n).padStart(2,'0');const off=-d.getTimezoneOffset();const sign=off>=0?'+':'-';const oh=pad(Math.floor(Math.abs(off)/60));const om=pad(Math.abs(off)%60);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+sign+oh+':'+om;}\nconst HISTORY_MS = 7 * 24 * 3600000;\nconst parts = msg.topic.split('/');\nconst name = parts[2];\nconst power = Number(msg.payload);\nif (isNaN(power)) return null;\nconst jobs = global.get('jobs') || {};\nconst dev = jobs[name];\nif (!dev) return null;\nconst cfg = flow.get('config');\n\ndev.last_power = power;\ndev.last_update = Date.now();\n\nlet scheduleMsg = null;\nlet statusMsg = null;\nlet switchOffMsg = null;\nlet justCompleted = false;\n\nif (dev.state === 'requested' && power > cfg.startup_w) {\n  dev.state = 'starting_up';\n  dev.reason = 'startup_detected';\n  dev.started_at = Date.now();\n  scheduleMsg = { device_name: name, payload: dev };\n} else if (dev.state === 'deferred_wait' && power > cfg.startup_w) {\n  dev.state = 'running';\n  dev.reason = 'deferred_resumed';\n  dev.started_at = Date.now();\n  dev.predicted_end_at = dev.started_at + (dev.estimated_runtime_min || 60) * 60000;\n  statusMsg = {\n    topic: 'home/appliance/' + name + '/status',\n    payload: JSON.stringify({\n      state: 'running', reason: dev.reason, device: name,\n      predicted_end_at: localIso(dev.predicted_end_at)\n    }),\n    retain: true\n  };\n} else if ((dev.state === 'running' || dev.state === 'starting_up') && power < cfg.completion_w) {\n  dev.state = 'waiting_for_completion';\n  dev.reason = 'power_dropped';\n  dev.completion_since = Date.now();\n  statusMsg = {\n    topic: 'home/appliance/' + name + '/status',\n    payload: JSON.stringify({\n      state: dev.state, reason: dev.reason, device: name,\n      completion_eta_at: localIso(dev.completion_since + (cfg.completion_dwell_ms || 300000))\n    }),\n    retain: true\n  };\n} else if (dev.state === 'waiting_for_completion' && power < cfg.completion_w) {\n  if (Date.now() - dev.completion_since > (cfg.completion_dwell_ms || 300000)) {\n    dev.state = 'completed';\n    dev.reason = 'completion_detected';\n    dev.completed_at = Date.now();\n    dev.completion_since = null;\n    justCompleted = true;\n    switchOffMsg = { topic: 'home/outlet/' + name + '/set', payload: 'OFF' };\n    statusMsg = {\n      topic: 'home/appliance/' + name + '/status',\n      payload: JSON.stringify({\n        state: 'completed', reason: dev.reason, device: name,\n        completed_at: localIso(dev.completed_at)\n      }),\n      retain: true\n    };\n  }\n} else if (dev.state === 'waiting_for_completion' && power >= cfg.completion_w) {\n  dev.state = 'running';\n  dev.reason = 'power_resumed';\n  dev.completion_since = null;\n  statusMsg = {\n    topic: 'home/appliance/' + name + '/status',\n    payload: JSON.stringify({\n      state: dev.state, reason: dev.reason, device: name\n    }),\n    retain: true\n  };\n}\n\nif (justCompleted) {\n  delete jobs[name];\n  jobs[name + '#' + dev.completed_at] = dev;\n  const cutoff = Date.now() - HISTORY_MS;\n  for (const k of Object.keys(jobs)) {\n    const j = jobs[k];\n    if (j && j.state === 'completed' && j.completed_at && j.completed_at < cutoff) {\n      delete jobs[k];\n    }\n  }\n} else {\n  jobs[name] = dev;\n}\nglobal.set('jobs', jobs);\nreturn [scheduleMsg, statusMsg, switchOffMsg];",
+    "outputs": 3,
+    "x": 620,
+    "y": 240,
+    "wires": [
+      [
+        "ac_scheduler"
+      ],
+      [
+        "8cf16d488e45ae65"
+      ],
+      [
+        "ac_switch_router"
+      ]
+    ]
+  },
+  {
+    "id": "ac_scheduler",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "scheduler",
+    "func": "function localIso(ms){const d=new Date(ms);const pad=n=>String(n).padStart(2,'0');const off=-d.getTimezoneOffset();const sign=off>=0?'+':'-';const oh=pad(Math.floor(Math.abs(off)/60));const om=pad(Math.abs(off)%60);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+sign+oh+':'+om;}\nconst SLOT_MS = 15 * 60000;\nconst SLOT_H = 0.25;\n\nconst isTest = !!msg._test;\nconst t = isTest ? msg._test : null;\n\nconst name = isTest ? t.device_name : msg.device_name;\nconst jobs = isTest ? (t.jobs || {}) : (global.get('jobs') || {});\nconst dev = jobs[name];\nif (!dev) return null;\nconst cfg = isTest ? t.cfg : flow.get('config');\nconst price_now = isTest\n  ? (t.price_now != null ? t.price_now : 0.30)\n  : (flow.get('price_now') || 0.30);\nconst forecastSrc = isTest ? (t.price_forecast || []) : (flow.get('price_forecast') || []);\nconst forecast = forecastSrc\n  .map(s => ({ t: new Date(s.time).getTime(), p: Number(s.price) }))\n  .filter(s => !isNaN(s.t) && !isNaN(s.p))\n  .sort((a, b) => a.t - b.t);\nconst pv_now_raw = isTest ? t.ess_pac : ((global.get('ess') || {}).pac);\nconst pv_now = Math.max(0, Number(pv_now_raw) || 0);\nconst pv_curve = isTest\n  ? (t.pv_curve || new Array(24).fill(0))\n  : (flow.get('pv_forecast_by_hour') || new Array(24).fill(0));\n\nconst now = isTest && t.now != null ? t.now : Date.now();\n\nlet otherPower = 0;\nfor (const dd of Object.values(jobs)) {\n  if (dd.name !== name && (dd.state === 'running' || dd.state === 'starting_up' || dd.state === 'waiting_for_completion')) {\n    otherPower += dd.max_power_w || dd.last_power || 0;\n  }\n}\nconst load = dev.max_power_w || dev.last_power || 0;\nconst runtimeMin = dev.estimated_runtime_min || 60;\nconst runtimeMs = runtimeMin * 60000;\nconst latestStart = dev.deadline - runtimeMs;\nconst slotCount = Math.max(1, Math.ceil(runtimeMin / 15));\n\nfunction alignSlot(tt) { return Math.floor(tt / SLOT_MS) * SLOT_MS; }\nfunction pvAt(tt) {\n  if (Math.abs(tt - now) < 10 * 60000) return pv_now;\n  const h = new Date(tt).getHours();\n  return pv_curve[h] || 0;\n}\nfunction netGridAt(tt) {\n  return Math.max(0, otherPower + load - pvAt(tt));\n}\nfunction priceAt(tt) {\n  if (tt < now + SLOT_MS) return price_now;\n  let p = price_now;\n  for (const s of forecast) {\n    if (s.t <= tt) p = s.p; else break;\n  }\n  return p;\n}\nfunction evaluate(startT) {\n  let cost = 0, spikeOk = true, firstNet = 0, firstPv = 0;\n  for (let i = 0; i < slotCount; i++) {\n    const tt = startT + i * SLOT_MS;\n    const ng = netGridAt(tt);\n    if (ng > cfg.spike_limit_w) spikeOk = false;\n    cost += (ng * SLOT_H / 1000) * priceAt(tt);\n    if (i === 0) { firstNet = ng; firstPv = pvAt(tt); }\n  }\n  return { cost: cost, spikeOk: spikeOk, firstNet: firstNet, firstPv: firstPv };\n}\n\nconst candidates = [now];\nlet tGrid = alignSlot(now) + SLOT_MS;\nwhile (tGrid <= latestStart) { candidates.push(tGrid); tGrid += SLOT_MS; }\n\nlet best = null;\nfor (const startT of candidates) {\n  const ev = evaluate(startT);\n  if (!ev.spikeOk) continue;\n  if (!best || ev.cost < best.cost) best = { time: startT, cost: ev.cost, firstNet: ev.firstNet, firstPv: ev.firstPv };\n}\n\nconst mustRunNow = latestStart <= now + 60000;\nlet decision, reason;\nif (mustRunNow) { decision = 'run_now'; reason = 'deadline'; }\nelse if (!best) { decision = 'run_now'; reason = 'no_viable_slot'; }\nelse if (best.time <= now + 60000) {\n  decision = 'run_now';\n  reason = pvAt(now) >= load ? 'pv_cover_now' : 'cheapest_now';\n} else {\n  decision = 'defer';\n  reason = pvAt(best.time) >= load ? 'pv_cover_later' : 'cheaper_later';\n}\n\nconst scheduledAt = decision === 'run_now' ? now : best.time;\n\nif (isTest) {\n  const expected = t.expected || null;\n  const got = {\n    decision: decision,\n    reason: reason,\n    scheduled_at: localIso(scheduledAt),\n  };\n  let pass = null;\n  if (expected) {\n    pass = true;\n    if (expected.decision && expected.decision !== decision) pass = false;\n    if (expected.reason && expected.reason !== reason) pass = false;\n    if (expected.scheduled_at && expected.scheduled_at !== got.scheduled_at) pass = false;\n    if (expected.scheduled_at_min) {\n      const minMs = new Date(expected.scheduled_at_min).getTime();\n      if (scheduledAt < minMs) pass = false;\n    }\n  }\n  return [null, null, null, {\n    topic: 'test/' + (t.label || name),\n    payload: {\n      label: t.label || null,\n      pass: pass,\n      expected: expected,\n      got: got,\n      diagnostics: {\n        now: localIso(now),\n        runtime_min: runtimeMin,\n        load_w: load,\n        pv_now_w: Math.round(pv_now),\n        cost_eur: best ? Math.round(best.cost * 1000) / 1000 : null,\n        first_net_grid_w: best ? Math.round(best.firstNet) : Math.round(netGridAt(now)),\n        first_pv_w: best ? Math.round(best.firstPv) : Math.round(pvAt(now)),\n        candidates_evaluated: candidates.length,\n      }\n    }\n  }];\n}\n\nif (decision === 'run_now') {\n  dev.state = 'running';\n  dev.reason = reason;\n  dev.scheduled_at = now;\n  dev.predicted_end_at = now + runtimeMs;\n  jobs[name] = dev;\n  global.set('jobs', jobs);\n  const statusMsg = {\n    topic: 'home/appliance/' + name + '/status',\n    payload: JSON.stringify({\n      state: 'running', device: name,\n      scheduled_at: localIso(now),\n      predicted_end_at: localIso(dev.predicted_end_at),\n      runtime_min: runtimeMin,\n      reason: reason,\n      net_grid_w: Math.round(netGridAt(now)),\n      pv_w: Math.round(pvAt(now))\n    }),\n    retain: true\n  };\n  return [null, null, statusMsg, null];\n}\n\nconst defer_ms = Math.max(60000, best.time - now);\ndev.state = 'deferred';\ndev.reason = reason;\ndev.scheduled_at = best.time;\ndev.predicted_end_at = best.time + runtimeMs;\ndev.defer_count = (dev.defer_count || 0) + 1;\njobs[name] = dev;\nglobal.set('jobs', jobs);\n\nconst switchOff = { topic: 'home/outlet/' + name + '/set', payload: 'OFF' };\nconst delayMsg = { payload: { name: name }, delay: defer_ms };\nconst statusMsg = {\n  topic: 'home/appliance/' + name + '/status',\n  payload: JSON.stringify({\n    state: 'deferred', device: name,\n    scheduled_at: localIso(best.time),\n    predicted_end_at: localIso(dev.predicted_end_at),\n    runtime_min: runtimeMin,\n    reason: reason,\n    expected_pv_w: Math.round(best.firstPv),\n    expected_net_grid_w: Math.round(best.firstNet)\n  }),\n  retain: true\n};\nreturn [switchOff, delayMsg, statusMsg, null];",
+    "outputs": 4,
+    "x": 620,
+    "y": 280,
+    "wires": [
+      [
+        "ac_switch_router"
+      ],
+      [
+        "ac_defer_delay"
+      ],
+      [
+        "8cf16d488e45ae65"
+      ],
+      [
+        "ac_test_debug"
+      ]
+    ]
+  },
+  {
+    "id": "ac_defer_delay",
+    "type": "delay",
+    "z": "ac_tab",
+    "name": "defer delay",
+    "pauseType": "delayv",
+    "timeout": "5",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "outputs": 1,
+    "x": 770,
+    "y": 340,
+    "wires": [
+      [
+        "ac_retry_fn"
+      ]
+    ]
+  },
+  {
+    "id": "ac_retry_fn",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "resume after defer",
+    "func": "function localIso(ms){const d=new Date(ms);const pad=n=>String(n).padStart(2,'0');const off=-d.getTimezoneOffset();const sign=off>=0?'+':'-';const oh=pad(Math.floor(Math.abs(off)/60));const om=pad(Math.abs(off)%60);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+sign+oh+':'+om;}\nconst name = msg.payload && msg.payload.name;\nif (!name) return null;\nconst jobs = global.get('jobs') || {};\nconst dev = jobs[name];\nif (!dev || dev.state === 'completed' || dev.state === 'running') return null;\ndev.state = 'deferred_wait';\njobs[name] = dev;\nglobal.set('jobs', jobs);\nconst switchOn = { topic: 'home/outlet/' + name + '/set', payload: 'ON' };\nconst statusMsg = {\n  topic: 'home/appliance/' + name + '/status',\n  payload: JSON.stringify({\n    state: 'deferred_wait', device: name,\n    scheduled_at: localIso(dev.scheduled_at)\n  }),\n  retain: true\n};\nreturn [switchOn, statusMsg];",
+    "outputs": 2,
+    "x": 960,
+    "y": 340,
+    "wires": [
+      [
+        "ac_switch_router"
+      ],
+      [
+        "8cf16d488e45ae65"
+      ]
+    ]
+  },
+  {
+    "id": "ac_mqtt_in_price",
+    "type": "mqtt in",
+    "z": "ac_tab",
+    "name": "energy/price",
+    "topic": "home/energy/price",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "mqtt_broker_config",
+    "inputs": 0,
+    "x": 150,
+    "y": 640,
+    "wires": [
+      [
+        "ac_price_fn"
+      ]
+    ]
+  },
+  {
+    "id": "ac_price_fn",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "price update",
+    "func": "const v = Number(msg.payload);\nif (!isNaN(v)) flow.set('price_now', v);\nreturn null;",
+    "outputs": 1,
+    "x": 390,
+    "y": 640,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ac_mqtt_in_forecast",
+    "type": "mqtt in",
+    "z": "ac_tab",
+    "name": "energy/price_forecast",
+    "topic": "home/energy/price_forecast",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_config",
+    "inputs": 0,
+    "x": 140,
+    "y": 540,
+    "wires": [
+      [
+        "ac_forecast_fn"
+      ]
+    ]
+  },
+  {
+    "id": "ac_forecast_fn",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "forecast update",
+    "func": "if (Array.isArray(msg.payload)) flow.set('price_forecast', msg.payload);\nreturn null;",
+    "outputs": 1,
+    "x": 380,
+    "y": 540,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ac_pv_forecast_inject",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "hourly PV curve refresh",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "3600",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 5,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 600,
+    "wires": [
+      [
+        "ac_pv_forecast_query"
+      ]
+    ]
+  },
+  {
+    "id": "ac_pv_forecast_query",
+    "type": "influxdb in",
+    "z": "ac_tab",
+    "influxdb": "influxdb_config_infra_2y",
+    "name": "pv mean_PAC hourly 30d",
+    "query": "SELECT mean(mean_PAC) AS mean FROM pv WHERE time > now() - 30d GROUP BY time(1h) fill(0)",
+    "rawOutput": false,
+    "precision": "",
+    "retentionPolicy": "",
+    "x": 430,
+    "y": 600,
+    "wires": [
+      [
+        "ac_pv_forecast_fn"
+      ]
+    ]
+  },
+  {
+    "id": "ac_pv_forecast_fn",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "build PV curve by hour",
+    "func": "const rows = Array.isArray(msg.payload) ? msg.payload : [];\nconst buckets = new Array(24).fill(null).map(() => []);\nfor (const r of rows) {\n  const t = r.time ? new Date(r.time).getTime() : null;\n  let v = null;\n  if (r.mean != null) v = Number(r.mean);\n  else if (r.mean_PAC != null) v = Number(r.mean_PAC);\n  if (t == null || v == null || isNaN(v)) continue;\n  const h = new Date(t).getHours();\n  buckets[h].push(v);\n}\nconst curve = buckets.map(b => b.length ? Math.round(b.reduce((a,c) => a + c, 0) / b.length) : 0);\nflow.set('pv_forecast_by_hour', curve);\nreturn null;",
+    "outputs": 1,
+    "x": 670,
+    "y": 600,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ac_switch_router",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "switch router",
+    "func": "const parts = (msg.topic || '').split('/');\nif (parts.length < 4 || parts[0] !== 'home' || parts[1] !== 'outlet') return null;\nconst name = parts[2];\nconst action = String(msg.payload).toUpperCase();\nif (action !== 'ON' && action !== 'OFF') return null;\nif (name === 'washing_machine') {\n  return { topic: 'z2m/0x70b3d52b6013d856/set', payload: JSON.stringify({ state: action }) };\n}\nif (name === 'dishwasher') {\n  return { topic: 'tm/cmnd/OgKuGsp/POWER', payload: action };\n}\nif (name === 'air_conditioner') {\n  return { topic: 'tm/cmnd/OgWzKli/POWER', payload: action };\n}\nnode.warn('switch router: unknown device ' + name);\nreturn null;",
+    "outputs": 1,
+    "x": 820,
+    "y": 140,
+    "wires": [
+      [
+        "ac_mqtt_out_switch",
+        "ac_switch_debug"
+      ]
+    ]
+  },
+  {
+    "id": "ac_mqtt_out_switch",
+    "type": "mqtt out",
+    "z": "ac_tab",
+    "d": true,
+    "name": "outlet switch",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "broker": "mqtt_broker_config",
+    "x": 1010,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "ac_switch_debug",
+    "type": "debug",
+    "z": "ac_tab",
+    "name": "outlet switch (disabled)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 1030,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "ac_mqtt_out_status",
+    "type": "mqtt out",
+    "z": "ac_tab",
+    "name": "appliance status",
+    "topic": "",
+    "qos": "0",
+    "retain": "true",
+    "broker": "mqtt_broker_config",
+    "x": 1240,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "ac_test_section",
+    "type": "comment",
+    "z": "ac_tab",
+    "name": "=== In-flow scheduler tests ===",
+    "info": "Click any test inject button to run a scenario through ac_scheduler with a fixed `now`, mocked jobs, prices, and PV.\nResults appear in the debug sidebar (filter for topic `test/...`).\nThe scheduler skips all MQTT/state side effects when msg._test is set.",
+    "x": 200,
+    "y": 700,
+    "wires": []
+  },
+  {
+    "id": "ac_test1_inject",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "T1: deadline override",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "topic": "test1",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 740,
+    "wires": [
+      [
+        "ac_test1_setup"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test1_setup",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "T1 setup",
+    "func": "msg._test = (function(){\n\nconst now = new Date('2026-04-14T10:00:00+02:00').getTime();\nreturn {\n  device_name: 'dishwasher',\n  now: now,\n  cfg: { spike_limit_w: 4000, startup_w: 50, completion_w: 20, price_defer_ratio: 0.85, pv_max_w: 4500 },\n  jobs: {\n    dishwasher: {\n      name: 'dishwasher',\n      state: 'starting_up',\n      deadline: now + 30 * 60000,\n      estimated_runtime_min: 60,\n      max_power_w: 2000,\n      last_power: 0,\n      defer_count: 0,\n    }\n  },\n  price_now: 0.50,\n  // Cheap forever \u2014 the scheduler must still pick now because deadline is binding\n  price_forecast: Array.from({length: 48}, (_, i) => ({\n    time: new Date(now + i * 15 * 60000).toISOString(),\n    price: 0.05\n  })),\n  pv_curve: new Array(24).fill(0),\n  ess_pac: 0,\n  expected: { decision: 'run_now', reason: 'deadline' }\n};\n})();\nmsg._test.label = \"T1: deadline override\";\nmsg.device_name = msg._test.device_name;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 460,
+    "y": 740,
+    "wires": [
+      [
+        "ac_scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test2_inject",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "T2: PV covers now",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "topic": "test2",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 780,
+    "wires": [
+      [
+        "ac_test2_setup"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test2_setup",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "T2 setup",
+    "func": "msg._test = (function(){\n\nconst now = new Date('2026-04-14T13:00:00+02:00').getTime();\nreturn {\n  device_name: 'dishwasher',\n  now: now,\n  cfg: { spike_limit_w: 4000, startup_w: 50, completion_w: 20, price_defer_ratio: 0.85, pv_max_w: 4500 },\n  jobs: {\n    dishwasher: {\n      name: 'dishwasher',\n      state: 'starting_up',\n      deadline: new Date('2026-04-14T22:00:00+02:00').getTime(),\n      estimated_runtime_min: 90,\n      max_power_w: 1500,\n      last_power: 0,\n      defer_count: 0,\n    }\n  },\n  price_now: 0.20,\n  price_forecast: Array.from({length: 48}, (_, i) => ({\n    time: new Date(now + i * 15 * 60000).toISOString(),\n    price: 0.20\n  })),\n  pv_curve: new Array(24).fill(0),\n  ess_pac: 3000,  // > load \u2192 netGrid 0 \u2192 cost 0 \u2192 cheapest = now\n  expected: { decision: 'run_now', reason: 'pv_cover_now' }\n};\n})();\nmsg._test.label = \"T2: PV covers now\";\nmsg.device_name = msg._test.device_name;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 460,
+    "y": 780,
+    "wires": [
+      [
+        "ac_scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test3_inject",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "T3: cheaper later",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "topic": "test3",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 820,
+    "wires": [
+      [
+        "ac_test3_setup"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test3_setup",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "T3 setup",
+    "func": "msg._test = (function(){\n\nconst now = new Date('2026-04-14T10:00:00+02:00').getTime();\nconst t0 = now;\nconst prices = [];\nfor (let i = 0; i < 48; i++) {\n  const t = t0 + i * 15 * 60000;\n  const h = new Date(t).getHours();\n  prices.push({ time: new Date(t).toISOString(), price: h >= 14 ? 0.05 : 0.40 });\n}\nreturn {\n  device_name: 'dishwasher',\n  now: now,\n  cfg: { spike_limit_w: 4000, startup_w: 50, completion_w: 20, price_defer_ratio: 0.85, pv_max_w: 4500 },\n  jobs: {\n    dishwasher: {\n      name: 'dishwasher',\n      state: 'starting_up',\n      deadline: new Date('2026-04-14T22:00:00+02:00').getTime(),\n      estimated_runtime_min: 60,\n      max_power_w: 2000,\n      last_power: 0,\n      defer_count: 0,\n    }\n  },\n  price_now: 0.40,\n  price_forecast: prices,\n  pv_curve: new Array(24).fill(0),\n  ess_pac: 0,\n  expected: {\n    decision: 'defer',\n    reason: 'cheaper_later',\n    scheduled_at_min: '2026-04-14T12:00:00.000Z' // 14:00 Berlin = 12:00 UTC\n  }\n};\n})();\nmsg._test.label = \"T3: cheaper later (defer past 14:00)\";\nmsg.device_name = msg._test.device_name;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 460,
+    "y": 820,
+    "wires": [
+      [
+        "ac_scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test4_inject",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "T4: pick 10:15",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "topic": "test4",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 860,
+    "wires": [
+      [
+        "ac_test4_setup"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test4_setup",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "T4 setup",
+    "func": "msg._test = (function(){\n\nconst now = new Date('2026-04-14T10:00:00+02:00').getTime();\nconst t0 = now;\nconst slotPrices = [1.00, 0.05, 0.05, 0.05, 0.30, 0.30, 0.30, 0.30];\nconst prices = [];\nfor (let i = 0; i < slotPrices.length; i++) {\n  prices.push({ time: new Date(t0 + i * 15 * 60000).toISOString(), price: slotPrices[i] });\n}\nfor (let i = slotPrices.length; i < 48; i++) {\n  prices.push({ time: new Date(t0 + i * 15 * 60000).toISOString(), price: 0.50 });\n}\nreturn {\n  device_name: 'dishwasher',\n  now: now,\n  cfg: { spike_limit_w: 4000, startup_w: 50, completion_w: 20, price_defer_ratio: 0.85, pv_max_w: 4500 },\n  jobs: {\n    dishwasher: {\n      name: 'dishwasher',\n      state: 'starting_up',\n      deadline: new Date('2026-04-14T22:00:00+02:00').getTime(),\n      estimated_runtime_min: 60,\n      max_power_w: 2000,\n      last_power: 0,\n      defer_count: 0,\n    }\n  },\n  price_now: 1.00,\n  price_forecast: prices,\n  pv_curve: new Array(24).fill(0),\n  ess_pac: 0,\n  expected: {\n    decision: 'defer',\n    reason: 'cheaper_later',\n    scheduled_at: '2026-04-14T08:15:00.000Z'  // 10:15 Berlin\n  }\n};\n})();\nmsg._test.label = \"T4: 15-min slot picks 10:15\";\nmsg.device_name = msg._test.device_name;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 460,
+    "y": 860,
+    "wires": [
+      [
+        "ac_scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test5_inject",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "T5: full appliance run",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "topic": "test5",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 900,
+    "wires": [
+      [
+        "ac_test5_sim"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test5_sim",
+    "type": "function",
+    "z": "ac_tab",
+    "name": "T5 full run sim",
+    "func": "// Full appliance run simulation: start_request -> startup_detected ->\n// scheduler_decision -> running -> completed. Mirrors the state transitions\n// in ac_handle_start and ac_power_monitor with a mock clock. Uses a local\n// jobs store so nothing in global.jobs changes and no MQTT is emitted.\nconst cfg = { spike_limit_w: 4000, startup_w: 50, completion_w: 20 };\nconst name = 'dishwasher';\nconst requested_at = new Date('2026-04-14T13:00:00+02:00').getTime();\nconst deadline = new Date('2026-04-14T22:00:00+02:00').getTime();\nconst runtime_min = 90;\nconst max_power_w = 1500;\nconst pv_now = 3500; // strong midday PV exceeds load -> pv_cover_now path\n\nconst jobs = {};\nconst timeline = [];\nlet clock = requested_at;\nfunction record(step, extra) {\n  timeline.push(Object.assign({\n    t: new Date(clock).toISOString(),\n    step: step,\n    state: jobs[name] ? jobs[name].state : null\n  }, extra || {}));\n}\n\n// ac_handle_start equivalent\njobs[name] = {\n  name: name, state: 'requested', deadline: deadline,\n  estimated_runtime_min: runtime_min, max_power_w: max_power_w,\n  requested_at: requested_at, last_power: 0, defer_count: 0\n};\nrecord('start_request');\n\n// scheduler shim: same decision branches ac_scheduler takes at startup.\nfunction runScheduler() {\n  const dev = jobs[name];\n  if (dev.deadline - runtime_min * 60000 <= clock + 60000) return { decision: 'run_now', reason: 'deadline' };\n  if (pv_now >= max_power_w) return { decision: 'run_now', reason: 'pv_cover_now' };\n  return { decision: 'run_now', reason: 'cheapest_now' };\n}\n\n// ac_power_monitor equivalent\nfunction power(w) {\n  const dev = jobs[name];\n  dev.last_power = w; dev.last_update = clock;\n  if (dev.state === 'requested' && w > cfg.startup_w) {\n    dev.state = 'starting_up'; dev.started_at = clock;\n    record('startup_detected', { power_w: w });\n    const s = runScheduler();\n    record('scheduler_decision', s);\n    if (s.decision === 'run_now') {\n      dev.state = 'running'; dev.scheduled_at = clock;\n      record('running');\n    }\n  } else if ((dev.state === 'running' || dev.state === 'starting_up') && w < cfg.completion_w) {\n    dev.completion_since = dev.completion_since || clock;\n    if (clock - dev.completion_since > 60000) {\n      dev.state = 'completed'; dev.completed_at = clock;\n      record('completed', { runtime_actual_min: Math.round((clock - dev.started_at) / 60000) });\n    }\n  } else if (w >= cfg.completion_w) {\n    dev.completion_since = null;\n  }\n}\n\n// timeline of simulated power readings\nclock += 5000;        power(0);    // outlet ON, appliance not yet drawing\nclock += 5000;        power(1500); // spike -> starting_up -> scheduler -> running\nclock += 30 * 60000;  power(1400); // mid-cycle\nclock += 58 * 60000;  power(10);   // completion_since set at 88 min\nclock += 30000;       power(10);   // 30s later, still inside 60s window\nclock += 40000;       power(10);   // +70s total -> completed\n\n// assertions\nconst actual = timeline.map(e => e.step);\nconst expectedSeq = ['start_request','startup_detected','scheduler_decision','running','completed'];\nlet pass = expectedSeq.every(s => actual.includes(s));\nconst sched = timeline.find(e => e.step === 'scheduler_decision');\nif (!sched || sched.decision !== 'run_now' || sched.reason !== 'pv_cover_now') pass = false;\nif (jobs[name].state !== 'completed') pass = false;\n\nnode.status({ fill: pass ? 'green' : 'red', shape: 'dot', text: pass ? 'pass' : 'fail' });\nreturn {\n  topic: 'test/T5: full appliance run',\n  payload: {\n    label: 'T5: full appliance run',\n    pass: pass,\n    expected_sequence: expectedSeq,\n    actual_sequence: actual,\n    timeline: timeline,\n    final_state: jobs[name]\n  }\n};",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 460,
+    "y": 900,
+    "wires": [
+      [
+        "ac_test_debug"
+      ]
+    ]
+  },
+  {
+    "id": "ac_test_debug",
+    "type": "debug",
+    "z": "ac_tab",
+    "name": "test results",
+    "active": true,
+    "tosidebar": true,
+    "console": true,
+    "tostatus": true,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "payload.pass",
+    "statusType": "msg",
+    "x": 900,
+    "y": 800,
+    "wires": []
+  },
+  {
+    "id": "ac_sim_dw_start",
+    "type": "inject",
+    "z": "ac_tab",
+    "name": "sim dishwasher START request",
+    "props": [
+      {
+        "p": "topic",
+        "vt": "str"
+      },
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "home/appliance/dishwasher/start",
+    "payload": "{\"estimated_runtime_min\":150,\"max_defer_hours\":12,\"max_power_w\":2200}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 340,
+    "wires": [
+      [
+        "ac_handle_start"
+      ]
+    ]
+  },
+  {
+    "id": "ac_sim_dw_debug",
+    "type": "debug",
+    "z": "ac_tab",
+    "name": "parse out",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 940,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "8cf16d488e45ae65",
+    "type": "change",
+    "z": "ac_tab",
+    "name": "",
+    "rules": [],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 990,
+    "y": 240,
+    "wires": [
+      [
+        "ac_mqtt_out_status",
+        "0cfe991cf5b24cd0"
+      ]
+    ]
+  },
+  {
+    "id": "0cfe991cf5b24cd0",
+    "type": "debug",
+    "z": "ac_tab",
+    "name": "debug 1",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1150,
+    "y": 300,
+    "wires": []
+  }
+]
