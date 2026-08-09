@@ -4,8 +4,7 @@
         "type": "tab",
         "label": "Appliance Control",
         "disabled": false,
-        "info": "Controls dishwasher, washing machine and air conditioner via MQTT-switched\npower outlets. Optimizes for electricity price, avoids grid-import spikes\nand prefers PV self-consumption (4500 Wp array).\n\nReuses existing configs:\n  MQTT broker    mqtt_broker_config (192.168.4.221)\n  InfluxDB live  influxdb_config_infra (measurement pv, field PAC)\n  InfluxDB 2y    influxdb_config_infra_2y (measurement pv, field mean_PAC)\n\nDevice wiring:\n  washing_machine  Zigbee2MQTT  z2m/0x70b3d52b6013d856        payload.power W\n                                z2m/0x70b3d52b6013d856/set    {state:ON|OFF}\n  dishwasher       Tasmota      tm/tele/OgKuGsp/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgKuGsp/POWER         ON|OFF\n  air_conditioner  Tasmota      tm/tele/OgWzKli/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgWzKli/POWER         ON|OFF\n\nUser API (MQTT):\n  home/appliance/<name>/start     JSON {deadline?, estimated_runtime_min?, max_defer_hours?, max_power_w?}\n  home/appliance/<name>/status    retained JSON {state, scheduled_at, runtime_min, reason, ...}\n\nName must be one of: washing_machine, dishwasher, air_conditioner.\n\nPer-appliance defaults (runtime_min, max_defer_hours, max_power_w) live in\n`ac_init_fn` under cfg.appliances.<name>. Any field in the start payload\noverrides the default. If deadline is omitted it is derived from\n`requested_at + max_defer_hours + runtime_min`.\n\nNOTE: Tasmota's default TelePeriod (300s) is too slow for responsive\nstartup detection. Set TelePeriod to ~10s on OgKuGsp and OgWzKli, or the\nscheduler won't see the first power spike for up to five minutes.",
-        "wires": null
+        "info": "Controls dishwasher, washing machine and air conditioner via MQTT-switched\npower outlets. Optimizes for electricity price, avoids grid-import spikes\nand prefers PV self-consumption (4500 Wp array).\n\nReuses existing configs:\n  MQTT broker    mqtt_broker_config (192.168.4.221)\n  InfluxDB live  influxdb_config_infra (measurement pv, field PAC)\n  InfluxDB 2y    influxdb_config_infra_2y (measurement pv, field mean_PAC)\n\nDevice wiring:\n  washing_machine  Zigbee2MQTT  z2m/0x70b3d52b6013d856        payload.power W\n                                z2m/0x70b3d52b6013d856/set    {state:ON|OFF}\n  dishwasher       Tasmota      tm/tele/OgKuGsp/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgKuGsp/POWER1        ON|OFF  (POWER2 = USB outlet)\n  air_conditioner  Tasmota      tm/tele/OgWzKli/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgWzKli/POWER         ON|OFF\n\nUser API (MQTT):\n  home/appliance/<name>/start     JSON {deadline?, estimated_runtime_min?, max_defer_hours?, max_power_w?}\n  home/appliance/<name>/status    retained JSON {state, scheduled_at, runtime_min, reason, ...}\n\nName must be one of: washing_machine, dishwasher, air_conditioner.\n\nPer-appliance defaults (runtime_min, max_defer_hours, max_power_w) live in\n`ac_init_fn` under cfg.appliances.<name>. Any field in the start payload\noverrides the default. If deadline is omitted it is derived from\n`requested_at + max_defer_hours + runtime_min`.\n\nNOTE: Tasmota's default TelePeriod (300s) is too slow for responsive\nstartup detection. Set TelePeriod to ~10s on OgKuGsp and OgWzKli, or the\nscheduler won't see the first power spike for up to five minutes."
     },
     {
         "id": "ac_changelog",
@@ -503,7 +502,7 @@
         "type": "function",
         "z": "ac_tab",
         "name": "switch router",
-        "func": "const parts = (msg.topic || '').split('/');\nif (parts.length < 4 || parts[0] !== 'home' || parts[1] !== 'outlet') return null;\nconst name = parts[2];\nconst action = String(msg.payload).toUpperCase();\nif (action !== 'ON' && action !== 'OFF') return null;\nif (name === 'washing_machine') {\n  return { topic: 'z2m/0x70b3d52b6013d856/set', payload: JSON.stringify({ state: action }) };\n}\nif (name === 'dishwasher') {\n  return { topic: 'tm/cmnd/OgKuGsp/POWER', payload: action };\n}\nif (name === 'air_conditioner') {\n  return { topic: 'tm/cmnd/OgWzKli/POWER', payload: action };\n}\nnode.warn('switch router: unknown device ' + name);\nreturn null;",
+        "func": "const parts = (msg.topic || '').split('/');\nif (parts.length < 4 || parts[0] !== 'home' || parts[1] !== 'outlet') return null;\nconst name = parts[2];\nconst action = String(msg.payload).toUpperCase();\nif (action !== 'ON' && action !== 'OFF') return null;\nif (name === 'washing_machine') {\n  return { topic: 'z2m/0x70b3d52b6013d856/set', payload: JSON.stringify({ state: action }) };\n}\nif (name === 'dishwasher') {\n  // POWER1 is the relay feeding the machine; POWER2 is the plug's USB outlet.\n  return { topic: 'tm/cmnd/OgKuGsp/POWER1', payload: action };\n}\nif (name === 'air_conditioner') {\n  return { topic: 'tm/cmnd/OgWzKli/POWER', payload: action };\n}\nnode.warn('switch router: unknown device ' + name);\nreturn null;",
         "outputs": 1,
         "x": 820,
         "y": 140,
@@ -928,8 +927,8 @@
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 1000,
-        "y": 360,
+        "x": 980,
+        "y": 380,
         "wires": [
             [
                 "ac_mqtt_out_tele"
@@ -969,6 +968,7 @@
         "randomLast": "5",
         "randomUnits": "seconds",
         "drop": false,
+        "allowrate": false,
         "outputs": 1,
         "x": 330,
         "y": 60,
@@ -976,7 +976,6 @@
             [
                 "ac_tele_rate"
             ]
-        ],
-        "allowrate": false
+        ]
     }
 ]
