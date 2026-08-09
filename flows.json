@@ -4,7 +4,8 @@
         "type": "tab",
         "label": "Appliance Control",
         "disabled": false,
-        "info": "Controls dishwasher, washing machine and air conditioner via MQTT-switched\npower outlets. Optimizes for electricity price, avoids grid-import spikes\nand prefers PV self-consumption (4500 Wp array).\n\nReuses existing configs:\n  MQTT broker    mqtt_broker_config (192.168.4.221)\n  InfluxDB live  influxdb_config_infra (measurement pv, field PAC)\n  InfluxDB 2y    influxdb_config_infra_2y (measurement pv, field mean_PAC)\n\nDevice wiring:\n  washing_machine  Zigbee2MQTT  z2m/0x70b3d52b6013d856        payload.power W\n                                z2m/0x70b3d52b6013d856/set    {state:ON|OFF}\n  dishwasher       Tasmota      tm/tele/OgKuGsp/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgKuGsp/POWER         ON|OFF\n  air_conditioner  Tasmota      tm/tele/OgWzKli/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgWzKli/POWER         ON|OFF\n\nUser API (MQTT):\n  home/appliance/<name>/start     JSON {deadline?, estimated_runtime_min?, max_defer_hours?, max_power_w?}\n  home/appliance/<name>/status    retained JSON {state, scheduled_at, runtime_min, reason, ...}\n\nName must be one of: washing_machine, dishwasher, air_conditioner.\n\nPer-appliance defaults (runtime_min, max_defer_hours, max_power_w) live in\n`ac_init_fn` under cfg.appliances.<name>. Any field in the start payload\noverrides the default. If deadline is omitted it is derived from\n`requested_at + max_defer_hours + runtime_min`.\n\nNOTE: Tasmota's default TelePeriod (300s) is too slow for responsive\nstartup detection. Set TelePeriod to ~10s on OgKuGsp and OgWzKli, or the\nscheduler won't see the first power spike for up to five minutes."
+        "info": "Controls dishwasher, washing machine and air conditioner via MQTT-switched\npower outlets. Optimizes for electricity price, avoids grid-import spikes\nand prefers PV self-consumption (4500 Wp array).\n\nReuses existing configs:\n  MQTT broker    mqtt_broker_config (192.168.4.221)\n  InfluxDB live  influxdb_config_infra (measurement pv, field PAC)\n  InfluxDB 2y    influxdb_config_infra_2y (measurement pv, field mean_PAC)\n\nDevice wiring:\n  washing_machine  Zigbee2MQTT  z2m/0x70b3d52b6013d856        payload.power W\n                                z2m/0x70b3d52b6013d856/set    {state:ON|OFF}\n  dishwasher       Tasmota      tm/tele/OgKuGsp/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgKuGsp/POWER         ON|OFF\n  air_conditioner  Tasmota      tm/tele/OgWzKli/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgWzKli/POWER         ON|OFF\n\nUser API (MQTT):\n  home/appliance/<name>/start     JSON {deadline?, estimated_runtime_min?, max_defer_hours?, max_power_w?}\n  home/appliance/<name>/status    retained JSON {state, scheduled_at, runtime_min, reason, ...}\n\nName must be one of: washing_machine, dishwasher, air_conditioner.\n\nPer-appliance defaults (runtime_min, max_defer_hours, max_power_w) live in\n`ac_init_fn` under cfg.appliances.<name>. Any field in the start payload\noverrides the default. If deadline is omitted it is derived from\n`requested_at + max_defer_hours + runtime_min`.\n\nNOTE: Tasmota's default TelePeriod (300s) is too slow for responsive\nstartup detection. Set TelePeriod to ~10s on OgKuGsp and OgWzKli, or the\nscheduler won't see the first power spike for up to five minutes.",
+        "wires": null
     },
     {
         "id": "ac_changelog",
@@ -859,7 +860,8 @@
         "wires": [
             [
                 "ac_mqtt_out_status",
-                "0cfe991cf5b24cd0"
+                "0cfe991cf5b24cd0",
+                "ac_tele_rate"
             ]
         ]
     },
@@ -908,5 +910,42 @@
                 "ac_handle_start"
             ]
         ]
+    },
+    {
+        "id": "ac_tele_rate",
+        "type": "function",
+        "z": "ac_tab",
+        "name": "sampling rate",
+        "func": "const FAST_S = 10;\nconst RATES = {\n  requested: 'fast',\n  starting_up: 'fast',\n  running: 'fast',\n  waiting_for_completion: 'fast',\n  deferred_wait: 'fast',\n  deferred: 'normal',\n  completed: 'normal'\n};\nconst DEVICES = {\n  washing_machine: { kind: 'z2m', id: '0x70b3d52b6013d856', normal_s: 30 },\n  dishwasher: { kind: 'tasmota', id: 'OgKuGsp', normal_s: 300 },\n  air_conditioner: { kind: 'tasmota', id: 'OgWzKli', normal_s: 300 }\n};\n\nconst parts = (msg.topic || '').split('/');\nif (parts.length < 4 || parts[0] !== 'home' || parts[1] !== 'appliance' || parts[3] !== 'status') return null;\nconst name = parts[2];\nconst dev = DEVICES[name];\nif (!dev) {\n  node.warn('sampling rate: unknown device ' + name);\n  return null;\n}\n\nlet p = msg.payload;\nif (typeof p === 'string') {\n  try { p = JSON.parse(p); } catch (e) { return null; }\n}\nconst rate = RATES[p && p.state];\nif (!rate) return null;\n\nconst applied = flow.get('tele_rate') || {};\nif (applied[name] === rate) return null;\napplied[name] = rate;\nflow.set('tele_rate', applied);\n\nconst seconds = rate === 'fast' ? FAST_S : dev.normal_s;\nnode.status({ fill: rate === 'fast' ? 'green' : 'grey', shape: 'dot', text: name + ' ' + seconds + 's' });\nif (dev.kind === 'tasmota') {\n  return { topic: 'tm/cmnd/' + dev.id + '/TelePeriod', payload: String(seconds) };\n}\nreturn {\n  topic: 'z2m/bridge/request/device/options',\n  payload: JSON.stringify({ id: dev.id, options: { measurement_poll_interval: seconds } })\n};\n",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1000,
+        "y": 360,
+        "wires": [
+            [
+                "ac_mqtt_out_tele"
+            ]
+        ]
+    },
+    {
+        "id": "ac_mqtt_out_tele",
+        "type": "mqtt out",
+        "z": "ac_tab",
+        "name": "sensor sampling rate",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_config",
+        "x": 1240,
+        "y": 360,
+        "wires": []
     }
 ]
