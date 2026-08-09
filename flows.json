@@ -25,6 +25,11 @@
         "props": [
             {
                 "p": "payload"
+            },
+            {
+                "p": "tele_reset",
+                "v": "true",
+                "vt": "bool"
             }
         ],
         "repeat": "",
@@ -38,7 +43,8 @@
         "y": 60,
         "wires": [
             [
-                "ac_init_fn"
+                "ac_init_fn",
+                "ac_tele_reset_delay"
             ]
         ]
     },
@@ -916,7 +922,7 @@
         "type": "function",
         "z": "ac_tab",
         "name": "sampling rate",
-        "func": "const FAST_S = 10;\nconst RATES = {\n  requested: 'fast',\n  starting_up: 'fast',\n  running: 'fast',\n  waiting_for_completion: 'fast',\n  deferred_wait: 'fast',\n  deferred: 'normal',\n  completed: 'normal'\n};\nconst DEVICES = {\n  washing_machine: { kind: 'z2m', id: '0x70b3d52b6013d856', normal_s: 30 },\n  dishwasher: { kind: 'tasmota', id: 'OgKuGsp', normal_s: 300 },\n  air_conditioner: { kind: 'tasmota', id: 'OgWzKli', normal_s: 300 }\n};\n\nconst parts = (msg.topic || '').split('/');\nif (parts.length < 4 || parts[0] !== 'home' || parts[1] !== 'appliance' || parts[3] !== 'status') return null;\nconst name = parts[2];\nconst dev = DEVICES[name];\nif (!dev) {\n  node.warn('sampling rate: unknown device ' + name);\n  return null;\n}\n\nlet p = msg.payload;\nif (typeof p === 'string') {\n  try { p = JSON.parse(p); } catch (e) { return null; }\n}\nconst rate = RATES[p && p.state];\nif (!rate) return null;\n\nconst applied = flow.get('tele_rate') || {};\nif (applied[name] === rate) return null;\napplied[name] = rate;\nflow.set('tele_rate', applied);\n\nconst seconds = rate === 'fast' ? FAST_S : dev.normal_s;\nnode.status({ fill: rate === 'fast' ? 'green' : 'grey', shape: 'dot', text: name + ' ' + seconds + 's' });\nif (dev.kind === 'tasmota') {\n  return { topic: 'tm/cmnd/' + dev.id + '/TelePeriod', payload: String(seconds) };\n}\nreturn {\n  topic: 'z2m/bridge/request/device/options',\n  payload: JSON.stringify({ id: dev.id, options: { measurement_poll_interval: seconds } })\n};\n",
+        "func": "const FAST_S = 10;\nconst RATES = {\n  requested: 'fast',\n  starting_up: 'fast',\n  running: 'fast',\n  waiting_for_completion: 'fast',\n  deferred_wait: 'fast',\n  deferred: 'normal',\n  completed: 'normal'\n};\nconst DEVICES = {\n  washing_machine: { kind: 'z2m', id: '0x70b3d52b6013d856', normal_s: 30 },\n  dishwasher: { kind: 'tasmota', id: 'OgKuGsp', normal_s: 300 },\n  air_conditioner: { kind: 'tasmota', id: 'OgWzKli', normal_s: 300 }\n};\n\nfunction command(name, rate) {\n  const dev = DEVICES[name];\n  const seconds = rate === 'fast' ? FAST_S : dev.normal_s;\n  if (dev.kind === 'tasmota') {\n    return { topic: 'tm/cmnd/' + dev.id + '/TelePeriod', payload: String(seconds) };\n  }\n  return {\n    topic: 'z2m/bridge/request/device/options',\n    payload: JSON.stringify({ id: dev.id, options: { measurement_poll_interval: seconds } })\n  };\n}\n\n// On startup the devices keep whatever rate they had before the restart, while\n// flow context has been lost. Re-assert the rate each device should be at.\n// NB: the flag cannot be called msg.reset - that is a control property the\n// delay node upstream consumes to flush its queue.\nif (msg.tele_reset === true) {\n  const jobs = global.get('jobs') || {};\n  const applied = {};\n  for (const name of Object.keys(DEVICES)) {\n    const job = jobs[name];\n    const rate = (job && RATES[job.state]) || 'normal';\n    applied[name] = rate;\n    node.send(command(name, rate));\n  }\n  flow.set('tele_rate', applied);\n  node.status({ fill: 'blue', shape: 'ring', text: 'reset ' + JSON.stringify(applied) });\n  return null;\n}\n\nconst parts = (msg.topic || '').split('/');\nif (parts.length < 4 || parts[0] !== 'home' || parts[1] !== 'appliance' || parts[3] !== 'status') return null;\nconst name = parts[2];\nif (!DEVICES[name]) {\n  node.warn('sampling rate: unknown device ' + name);\n  return null;\n}\n\nlet p = msg.payload;\nif (typeof p === 'string') {\n  try { p = JSON.parse(p); } catch (e) { return null; }\n}\nconst rate = RATES[p && p.state];\nif (!rate) return null;\n\nconst applied = flow.get('tele_rate') || {};\nif (applied[name] === rate) return null;\napplied[name] = rate;\nflow.set('tele_rate', applied);\n\nnode.status({ fill: rate === 'fast' ? 'green' : 'grey', shape: 'dot', text: name + ' ' + rate });\nreturn command(name, rate);\n",
         "outputs": 1,
         "noerr": 0,
         "initialize": "",
@@ -947,5 +953,30 @@
         "x": 1240,
         "y": 360,
         "wires": []
+    },
+    {
+        "id": "ac_tele_reset_delay",
+        "type": "delay",
+        "z": "ac_tab",
+        "name": "wait for broker",
+        "pauseType": "delay",
+        "timeout": "15",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "outputs": 1,
+        "x": 330,
+        "y": 60,
+        "wires": [
+            [
+                "ac_tele_rate"
+            ]
+        ],
+        "allowrate": false
     }
 ]
