@@ -138,7 +138,6 @@
         "id": "ac_mqtt_in_wm",
         "type": "mqtt in",
         "z": "ac_tab",
-        "d": true,
         "name": "z2m washing machine",
         "topic": "z2m/0x70b3d52b6013d856",
         "qos": "0",
