@@ -176,7 +176,6 @@
         "id": "ac_mqtt_in_ac",
         "type": "mqtt in",
         "z": "ac_tab",
-        "d": true,
         "name": "tasmota air conditioner SENSOR",
         "topic": "tm/tele/OgWzKli/SENSOR",
         "qos": "0",
