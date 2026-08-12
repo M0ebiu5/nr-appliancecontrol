@@ -986,7 +986,7 @@
         "type": "comment",
         "z": "ac_tab",
         "name": "=== Air conditioner thermostat ===",
-        "info": "Runs the AC from `weather.eco_in` (inside temperature) and the live PV power in `ess.pac`.\nOn at >= temp_on_c, off below temp_off_c, and never on below pv_min_w - a sustained PV dip also stops a running unit.\nCommands go through `handle command`, so the scheduler, power monitor and voice announcements stay in charge of the rest.\nTurning the AC off by hand - stop command, plug button, or its own remote - blocks automatic starts for the rest of that calendar day (`ac_manual_off_day`, file store). A manual start still works, and a stop this node issued itself does not count.\n\nTemperatures are settable at runtime on `red/appliance/air_conditioner/config`: a JSON object {temp_on_c, temp_off_c}, a bare number for temp_on_c alone, or `default` to drop back to cfg.ac_thermostat. Overrides live in `ac_thermostat_cfg` (file store).\n`startup watchdog` cuts an outlet whose appliance never drew power within cfg.startup_timeout_min (15 min for the AC, 30 for the rest) - for the AC that also blocks the day, since nothing would stop the thermostat from asking again a minute later.",
+        "info": "Runs the AC from `weather.eco_in` (inside temperature) and the live PV power in `ess.pac`.\nOn at >= temp_on_c, off below temp_off_c, and never on below pv_min_w - a sustained PV dip also stops a running unit.\nCommands go through `handle command`, so the scheduler, power monitor and voice announcements stay in charge of the rest.\nTurning the AC off by hand - stop command, plug button, or its own remote - blocks automatic starts for the rest of that calendar day (`ac_manual_off_day`, file store). A manual start still works, and a stop this node issued itself does not count.\n\nTemperatures are settable at runtime on `red/appliance/air_conditioner/config`: a JSON object {temp_on_c, temp_off_c}, a bare number for temp_on_c alone, or `default` to drop back to cfg.ac_thermostat. Overrides live in `ac_thermostat_cfg` (file store). The two inject buttons send the same thing by hand - edit the JSON in the first one to try other values.\n`startup watchdog` cuts an outlet whose appliance never drew power within cfg.startup_timeout_min (15 min for the AC, 30 for the rest) - for the AC that also blocks the day, since nothing would stop the thermostat from asking again a minute later.",
         "x": 200,
         "y": 960,
         "wires": []
@@ -1119,6 +1119,64 @@
         "wires": [
             [
                 "8cf16d488e45ae65"
+            ]
+        ]
+    },
+    {
+        "id": "ac_sim_thermo_cfg",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "set thermostat 28/26",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            },
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "red/appliance/air_conditioner/config",
+        "payload": "{\"temp_on_c\": 28, \"temp_off_c\": 26}",
+        "payloadType": "json",
+        "x": 200,
+        "y": 1160,
+        "wires": [
+            [
+                "ac_thermo_config"
+            ]
+        ]
+    },
+    {
+        "id": "ac_sim_thermo_default",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "thermostat back to defaults",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            },
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "red/appliance/air_conditioner/config",
+        "payload": "default",
+        "payloadType": "str",
+        "x": 200,
+        "y": 1200,
+        "wires": [
+            [
+                "ac_thermo_config"
             ]
         ]
     }
