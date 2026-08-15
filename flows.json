@@ -11,7 +11,7 @@
         "type": "comment",
         "z": "ac_tab",
         "name": "=== Changelog ===",
-        "info": "v0.1  2026-04-13  Initial flow: MQTT start API, per-device power monitor, scheduler with hourly PV curve + price forecast, defer/retry, Influx 30s poll for live PV.\nv0.2  2026-04-14  Removed 30s Influx PV poll; live PV now read from global `ess.pac` (shared with battery controller).\nv0.3  2026-04-14  Scheduler rewritten to evaluate candidate starts on a 15-min grid and integrate cost/spike check across the full runtime, matching battery controller v2 slot convention.\nv0.4  2026-04-14  Added this changelog comment node.\nv0.5  2026-04-14  Job state moved from flow-scoped `devices` to `global.jobs`, so other flows can read appliance scheduling state.\nv0.6  2026-04-14  Added in-flow test cases (T1-T4): inject buttons + setup function nodes that exercise ac_scheduler in `_test` mode (no MQTT/state side effects), results to debug sidebar.\nv0.7  2026-04-14  Per-appliance defaults for runtime_min, max_defer_hours, max_power_w in cfg.appliances; start payload fields are now optional and override the defaults; deadline is derived when absent.\nv0.8  2026-04-14  Completed jobs are retained in `global.jobs` under archive keys `<name>#<completed_at>` for 7 days; pruned on each completion and on new start. Active jobs remain keyed by bare name.\nv0.9  2026-04-15  Added in-flow test T5: end-to-end appliance run simulation (start\u2192startup\u2192scheduler\u2192running\u2192completion) with a mock clock and no side effects.\nv0.10 2026-08-12  Air conditioner runs on a thermostat: `weather.eco_in` >= 27 starts it, < 26 stops it, PV below 1200 W blocks a start and (after a 5 min dwell) stops a run. AC defer window cut to 1 h; start/stop commands carry a reason so the voice message says why.\nv0.11 2026-08-12  Turning the air conditioner off by hand (stop command, plug button or its own remote) blocks thermostat starts for the rest of the calendar day.\nv0.12 2026-08-12  Startup watchdog: an outlet whose appliance never draws power is switched off again after cfg.startup_timeout_min (AC 15 min, others 30) and the job dropped; for the AC that also blocks the day. AC thermostat temperatures are settable at runtime on red/appliance/air_conditioner/config and persist in the file context store.\nv0.13 2026-08-12  AC thermostat also stops, and holds off starting, while the outside temperature (weather.temp) is at or below cfg.ac_thermostat.temp_outside_off_c (25 C, +0.5 K margin before it may start again); the spoken message names the outside temperature. The threshold is settable on the config topic.\nv0.14 2026-08-12  The startup watchdog only cuts an outlet when it has actually received power readings that stayed below startup_w. If the meter said nothing at all it warns once (status reason no_telemetry) and leaves the outlet on - a silent plug is not proof that the appliance is idle.",
+        "info": "v0.1  2026-04-13  Initial flow: MQTT start API, per-device power monitor, scheduler with hourly PV curve + price forecast, defer/retry, Influx 30s poll for live PV.\nv0.2  2026-04-14  Removed 30s Influx PV poll; live PV now read from global `ess.pac` (shared with battery controller).\nv0.3  2026-04-14  Scheduler rewritten to evaluate candidate starts on a 15-min grid and integrate cost/spike check across the full runtime, matching battery controller v2 slot convention.\nv0.4  2026-04-14  Added this changelog comment node.\nv0.5  2026-04-14  Job state moved from flow-scoped `devices` to `global.jobs`, so other flows can read appliance scheduling state.\nv0.6  2026-04-14  Added in-flow test cases (T1-T4): inject buttons + setup function nodes that exercise ac_scheduler in `_test` mode (no MQTT/state side effects), results to debug sidebar.\nv0.7  2026-04-14  Per-appliance defaults for runtime_min, max_defer_hours, max_power_w in cfg.appliances; start payload fields are now optional and override the defaults; deadline is derived when absent.\nv0.8  2026-04-14  Completed jobs are retained in `global.jobs` under archive keys `<name>#<completed_at>` for 7 days; pruned on each completion and on new start. Active jobs remain keyed by bare name.\nv0.9  2026-04-15  Added in-flow test T5: end-to-end appliance run simulation (start\u2192startup\u2192scheduler\u2192running\u2192completion) with a mock clock and no side effects.\nv0.10 2026-08-12  Air conditioner runs on a thermostat: `weather.eco_in` >= 27 starts it, < 26 stops it, PV below 1200 W blocks a start and (after a 5 min dwell) stops a run. AC defer window cut to 1 h; start/stop commands carry a reason so the voice message says why.\nv0.11 2026-08-12  Turning the air conditioner off by hand (stop command, plug button or its own remote) blocks thermostat starts for the rest of the calendar day.\nv0.12 2026-08-12  Startup watchdog: an outlet whose appliance never draws power is switched off again after cfg.startup_timeout_min (AC 15 min, others 30) and the job dropped; for the AC that also blocks the day. AC thermostat temperatures are settable at runtime on red/appliance/air_conditioner/config and persist in the file context store.\nv0.13 2026-08-12  AC thermostat also stops, and holds off starting, while the outside temperature (weather.temp) is at or below cfg.ac_thermostat.temp_outside_off_c (25 C, +0.5 K margin before it may start again); the spoken message names the outside temperature. The threshold is settable on the config topic.\nv0.14 2026-08-12  The startup watchdog only cuts an outlet when it has actually received power readings that stayed below startup_w. If the meter said nothing at all it warns once (status reason no_telemetry) and leaves the outlet on - a silent plug is not proof that the appliance is idle.\nv0.15 2026-08-15  Dishwasher dashboard status: while the machine runs, a German status line is published every 5 min on red/status/info/gssp in `payload.hasstopic`, plus one message when the run ends.",
         "x": 150,
         "y": 20,
         "wires": []
@@ -791,7 +791,7 @@
         "type": "debug",
         "z": "ac_tab",
         "name": "test results",
-        "active": true,
+        "active": false,
         "tosidebar": true,
         "console": true,
         "tostatus": true,
@@ -837,7 +837,7 @@
         "type": "debug",
         "z": "ac_tab",
         "name": "parse out",
-        "active": true,
+        "active": false,
         "tosidebar": true,
         "console": false,
         "tostatus": false,
@@ -854,7 +854,7 @@
         "type": "function",
         "z": "ac_tab",
         "name": "status voice",
-        "func": "// Single choke point for every appliance status message: add a German\n// spoken form alongside the structured fields.\nconst NAMES = {\n  dishwasher: 'Geschirrsp\\u00fcler',\n  washing_machine: 'Waschmaschine',\n  air_conditioner: 'Klimaanlage'\n};\nconst PHRASES = {\n  requested: 'wartet',\n  deferred: 'wartet auf g\\u00fcnstigen Strom',\n  deferred_wait: 'wartet auf den Start',\n  starting_up: 'startet',\n  running: 'l\\u00e4uft',\n  waiting_for_completion: 'ist fast fertig',\n  completed: 'ist fertig',\n  off: 'ist ausgeschaltet'\n};\n// Reasons that deserve their own wording; anything not listed here falls back\n// to the phrase for the state.\nconst REASONS = {\n  too_warm: 'startet, es ist zu warm',\n  temp_reached: 'schaltet ab, es ist k\\u00fchl genug',\n  pv_low: 'schaltet ab, es gibt zu wenig Solarstrom',\n  startup_timeout: 'wurde nicht gestartet, die Steckdose ist wieder aus'\n};\n\nlet p = msg.payload;\nif (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { return msg; } }\nif (!p || typeof p !== 'object') return msg;\n\n// \"noch 2 Stunden und 23 Minuten\" - spoken German, so 1 becomes \"eine\".\nfunction restlaufzeit(iso) {\n  const end = iso ? new Date(iso).getTime() : NaN;\n  if (isNaN(end)) return null;\n  const total = Math.round((end - Date.now()) / 60000);\n  if (total <= 0) return null;\n  const h = Math.floor(total / 60);\n  const m = total % 60;\n  const parts = [];\n  if (h === 1) { parts.push('eine Stunde'); } else if (h > 1) { parts.push(h + ' Stunden'); }\n  if (m === 1) { parts.push('eine Minute'); } else if (m > 1) { parts.push(m + ' Minuten'); }\n  if (!parts.length) return 'weniger als eine Minute';\n  return parts.join(' und ');\n}\n\n// 27.5 is spoken \"27,5 Grad\".\nfunction grad(v) { return String(v).replace('.', ',') + ' Grad'; }\n\nconst device = NAMES[p.device];\nlet phrase = REASONS[p.reason] || PHRASES[p.state];\nif (p.state === 'running' && !REASONS[p.reason]) {\n  const rest = restlaufzeit(p.predicted_end_at);\n  phrase = rest ? 'l\\u00e4uft noch ' + rest : 'l\\u00e4uft';\n} else if (p.reason === 'no_telemetry') {\n  phrase = 'meldet keinen Stromverbrauch, die Steckdose bleibt an';\n} else if (p.reason === 'outside_cool') {\n  phrase = 'schaltet ab, drau\\u00dfen sind es nur ' + grad(p.outside_c) + ', besser l\\u00fcften';\n} else if (p.state === 'config') {\n  // Read back only what was actually set; a reset has no `changed` and reads all of it.\n  const ch = Array.isArray(p.changed) ? p.changed : Object.keys(p);\n  const bits = [];\n  if (ch.indexOf('temp_on_c') !== -1 || ch.indexOf('temp_off_c') !== -1) {\n    bits.push('startet ab ' + grad(p.temp_on_c) + ' und stoppt unter ' + grad(p.temp_off_c));\n  }\n  if (ch.indexOf('temp_outside_off_c') !== -1) {\n    bits.push('bleibt aus, solange es drau\\u00dfen h\\u00f6chstens ' + grad(p.temp_outside_off_c) + ' hat');\n  }\n  phrase = bits.join(', und ');\n} else if (p.state === 'config_rejected') {\n  phrase = 'hat die Einstellung nicht angenommen';\n}\nif (device && phrase) { p.voice = device + ' ' + phrase; }\n\nmsg.payload = p;\nreturn msg;\n",
+        "func": "// Single choke point for every appliance status message: add a German\n// spoken form alongside the structured fields.\nconst NAMES = {\n  dishwasher: 'Geschirrsp\\u00fcler',\n  washing_machine: 'Waschmaschine',\n  air_conditioner: 'Klimaanlage'\n};\nconst PHRASES = {\n  requested: 'wartet',\n  deferred: 'wartet auf g\\u00fcnstigen Strom',\n  deferred_wait: 'wartet auf den Start',\n  starting_up: 'startet',\n  running: 'l\\u00e4uft',\n  waiting_for_completion: 'ist fast fertig',\n  completed: 'ist fertig',\n  off: 'ist ausgeschaltet'\n};\n// Reasons that deserve their own wording; anything not listed here falls back\n// to the phrase for the state.\nconst REASONS = {\n  too_warm: 'startet, es ist zu warm',\n  temp_reached: 'schaltet ab, es ist k\\u00fchl genug',\n  pv_low: 'schaltet ab, es gibt zu wenig Solarstrom',\n  startup_timeout: 'wurde nicht gestartet, die Steckdose ist wieder aus'\n};\n\nlet p = msg.payload;\nif (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { return msg; } }\nif (!p || typeof p !== 'object') return msg;\n\n// \"noch 2 Stunden und 23 Minuten\" - spoken German, so 1 becomes \"eine\".\nfunction restlaufzeit(iso) {\n  const end = iso ? new Date(iso).getTime() : NaN;\n  if (isNaN(end)) return null;\n  const total = Math.round((end - Date.now()) / 60000);\n  if (total <= 0) return null;\n  const h = Math.floor(total / 60);\n  const m = total % 60;\n  const parts = [];\n  if (h === 1) { parts.push('eine Stunde'); } else if (h > 1) { parts.push(h + ' Stunden'); }\n  if (m === 1) { parts.push('eine Minute'); } else if (m > 1) { parts.push(m + ' Minuten'); }\n  if (!parts.length) return 'weniger als eine Minute';\n  return parts.join(' und ');\n}\n\n// 27.5 is spoken \"27,5 Grad\".\nfunction grad(v) { return String(v).replace('.', ',') + ' Grad'; }\n\nconst device = NAMES[p.device];\nlet phrase = REASONS[p.reason] || PHRASES[p.state];\nif (p.state === 'running' && !REASONS[p.reason]) {\n  const rest = restlaufzeit(p.predicted_end_at);\n  phrase = rest ? 'l\\u00e4uft noch ' + rest : 'l\\u00e4uft';\n} else if (p.reason === 'no_telemetry') {\n  phrase = 'meldet keinen Stromverbrauch, die Steckdose bleibt an';\n} else if (p.reason === 'outside_cool') {\n  phrase = 'schaltet ab, drau\\u00dfen sind es nur ' + grad(p.outside_c) + ', besser l\\u00fcften';\n} else if (p.state === 'config') {\n  // Read back only what was actually set; a reset has no `changed` and reads all of it.\n  const ch = Array.isArray(p.changed) ? p.changed : Object.keys(p);\n  const bits = [];\n  if (ch.indexOf('temp_on_c') !== -1 || ch.indexOf('temp_off_c') !== -1) {\n    bits.push('startet ab ' + grad(p.temp_on_c) + ' und stoppt unter ' + grad(p.temp_off_c));\n  }\n  if (ch.indexOf('temp_outside_off_c') !== -1) {\n    bits.push('bleibt aus, solange es drau\\u00dfen h\\u00f6chstens ' + grad(p.temp_outside_off_c) + ' hat');\n  }\n  phrase = bits.join(', und ');\n} else if (p.state === 'config_rejected') {\n  phrase = 'hat die Einstellung nicht angenommen';\n}\nif (device && phrase) { p.voicetext = device + ' ' + phrase; }\n\nmsg.payload = p;\nmsg.topic = \"red/status/info/appliance\"\nreturn msg;\n",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -1019,8 +1019,9 @@
         "type": "function",
         "z": "ac_tab",
         "name": "AC thermostat",
-        "func": "// Temperature/PV thermostat for the air conditioner. Every other appliance here\n// is started by the user; the AC decides for itself from the inside temperature\n// and the PV surplus, then goes through the same start/stop command handler.\nfunction localDay(ms){const d=new Date(ms);const pad=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}\nconst NAME = 'air_conditioner';\nconst cfg = flow.get('config') || {};\n// `thermostat config` may override the temperatures at runtime.\nconst th = Object.assign({}, cfg.ac_thermostat || {}, flow.get('ac_thermostat_cfg', 'file') || {});\nconst temp_on = th.temp_on_c != null ? th.temp_on_c : 27;\nconst temp_off = th.temp_off_c != null ? th.temp_off_c : 26;\nconst pv_min = th.pv_min_w != null ? th.pv_min_w : 1200;\nconst pv_low_dwell = th.pv_low_dwell_ms != null ? th.pv_low_dwell_ms : 5 * 60000;\n\n// \"weather\" is written to the file context store by the weather flow:\n// eco_in is the inside temperature, temp the outside one.\nconst w = global.get('weather', 'file') || global.get('weather') || {};\nconst temp = Number(w.eco_in);\nif (isNaN(temp)) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'no eco_in' });\n  return null;\n}\n\n// Cool outside: stop a run and hold off starting one - open a window instead.\n// Without the margin the AC would cycle while the reading sits on the mark.\n// An unknown outside temperature simply does not veto anything.\nconst outside = Number(w.temp);\nconst outside_max = th.temp_outside_off_c != null ? th.temp_outside_off_c : 25;\nconst outside_margin = th.outside_hysteresis_c != null ? th.outside_hysteresis_c : 0.5;\nconst outside_cool = !isNaN(outside) && outside <= outside_max;\nconst outside_warm_enough = isNaN(outside) || outside > outside_max + outside_margin;\nconst pv = Math.max(0, Number((global.get('ess') || {}).pac) || 0);\nconst now = Date.now();\n\n// Stopping on PV needs the dip to persist, otherwise every cloud cycles the\n// compressor. Starting uses the live value - waiting there costs nothing.\nconst pvOk = pv >= pv_min;\nlet pvState = flow.get('ac_pv_state');\nif (!pvState || pvState.ok !== pvOk) {\n  pvState = { ok: pvOk, since: now };\n  flow.set('ac_pv_state', pvState);\n}\nconst pvLowSustained = !pvOk && (now - pvState.since) >= pv_low_dwell;\n\nconst jobs = global.get('jobs') || {};\nconst job = jobs[NAME];\nconst active = !!job && job.state !== 'completed';\n\n// A run that ended without this node asking for it means the unit was turned\n// off by hand - the plug button, its own remote (the power monitor then\n// completes the job), or a stop command. Either way, no auto start today.\n// A stop command is caught in `handle command`, which sees it even when no\n// job was running.\nif (flow.get('ac_thermo_was_active') === true && !active) {\n  flow.set('ac_manual_off_day', localDay(now), 'file');\n}\nconst locked_out = flow.get('ac_manual_off_day', 'file') === localDay(now);\n\nlet cmd = null;\nlet reason = null;\nlet details = null;\nif (active) {\n  if (temp < temp_off) { cmd = false; reason = 'temp_reached'; }\n  else if (outside_cool) { cmd = false; reason = 'outside_cool'; details = { outside_c: outside }; }\n  else if (pvLowSustained) { cmd = false; reason = 'pv_low'; }\n} else if (temp >= temp_on && pvOk && outside_warm_enough && !locked_out) {\n  cmd = true;\n  reason = 'too_warm';\n}\n\n// Remember what the run state will be once the command has been handled, so\n// the next tick can tell an outside stop from one of ours.\nflow.set('ac_thermo_was_active', cmd === null ? active : cmd);\n\nconst info = temp.toFixed(1) + (isNaN(outside) ? '' : '/' + outside.toFixed(1)) + '\u00b0C ' + Math.round(pv) + 'W';\nif (cmd === null) {\n  const idle = locked_out ? 'off today ' : 'idle ';\n  node.status({ fill: active ? 'green' : 'grey', shape: 'dot', text: (active ? job.state + ' ' : idle) + info });\n  return null;\n}\nnode.status({ fill: cmd ? 'green' : 'blue', shape: 'dot', text: reason + ' ' + info });\nconst out = { on: cmd, reason: reason, src: 'thermostat' };\nif (details) out.details = details;\nreturn { topic: 'red/appliance/' + NAME, payload: out };\n",
+        "func": "// Temperature/PV thermostat for the air conditioner. Every other appliance here\n// is started by the user; the AC decides for itself from the inside temperature\n// and the PV surplus, then goes through the same start/stop command handler.\nfunction localDay(ms){const d=new Date(ms);const pad=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}\nconst NAME = 'air_conditioner';\nconst cfg = flow.get('config') || {};\n// `thermostat config` may override the temperatures at runtime.\nconst th = Object.assign({}, cfg.ac_thermostat || {}, flow.get('ac_thermostat_cfg', 'file') || {});\nconst temp_on = th.temp_on_c != null ? th.temp_on_c : 27;\nconst temp_off = th.temp_off_c != null ? th.temp_off_c : 26;\nconst pv_min = th.pv_min_w != null ? th.pv_min_w : 1200;\nconst pv_low_dwell = th.pv_low_dwell_ms != null ? th.pv_low_dwell_ms : 5 * 60000;\n\n// \"weather\" is written to the file context store by the weather flow:\n// eco_in is the inside temperature, temp the outside one.\nconst w = global.get('weather', 'file') || global.get('weather') || {};\nconst temp = Number(w.eco_in);\nif (isNaN(temp)) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'no eco_in' });\n  return null;\n}\n\n// Cool outside: stop a run and hold off starting one - open a window instead.\n// Without the margin the AC would cycle while the reading sits on the mark.\n// An unknown outside temperature simply does not veto anything.\nconst outside = Number(w.temp);\nconst outside_max = th.temp_outside_off_c != null ? th.temp_outside_off_c : 25.8;\nconst outside_margin = th.outside_hysteresis_c != null ? th.outside_hysteresis_c : 0.5;\nconst outside_cool = !isNaN(outside) && outside <= outside_max;\nconst outside_warm_enough = isNaN(outside) || outside > outside_max + outside_margin;\nconst pv = Math.max(0, Number((global.get('ess') || {}).pac) || 0);\nconst now = Date.now();\n\n// Stopping on PV needs the dip to persist, otherwise every cloud cycles the\n// compressor. Starting uses the live value - waiting there costs nothing.\nconst pvOk = pv >= pv_min;\nlet pvState = flow.get('ac_pv_state');\nif (!pvState || pvState.ok !== pvOk) {\n  pvState = { ok: pvOk, since: now };\n  flow.set('ac_pv_state', pvState);\n}\nconst pvLowSustained = !pvOk && (now - pvState.since) >= pv_low_dwell;\n\nconst jobs = global.get('jobs') || {};\nconst job = jobs[NAME];\nconst active = !!job && job.state !== 'completed';\n\n// A run that ended without this node asking for it means the unit was turned\n// off by hand - the plug button, its own remote (the power monitor then\n// completes the job), or a stop command. Either way, no auto start today.\n// A stop command is caught in `handle command`, which sees it even when no\n// job was running.\nif (flow.get('ac_thermo_was_active') === true && !active) {\n  flow.set('ac_manual_off_day', localDay(now), 'file');\n}\nconst locked_out = flow.get('ac_manual_off_day', 'file') === localDay(now);\n\nlet cmd = null;\nlet reason = null;\nlet details = null;\nif (active) {\n  if (temp < temp_off) { cmd = false; reason = 'temp_reached'; }\n  else if (outside_cool) { cmd = false; reason = 'outside_cool'; details = { outside_c: outside }; }\n  else if (pvLowSustained) { cmd = false; reason = 'pv_low'; }\n} else if (temp >= temp_on && pvOk && outside_warm_enough && !locked_out) {\n  cmd = true;\n  reason = 'too_warm';\n}\n\n// Remember what the run state will be once the command has been handled, so\n// the next tick can tell an outside stop from one of ours.\nflow.set('ac_thermo_was_active', cmd === null ? active : cmd);\n\nconst info = temp.toFixed(1) + (isNaN(outside) ? '' : '/' + outside.toFixed(1)) + '\u00b0C ' + Math.round(pv) + 'W';\nif (cmd === null) {\n  const idle = locked_out ? 'off today ' : 'idle ';\n  node.status({ fill: active ? 'green' : 'grey', shape: 'dot', text: (active ? job.state + ' ' : idle) + info });\n  return null;\n}\nnode.status({ fill: cmd ? 'green' : 'blue', shape: 'dot', text: reason + ' ' + info });\nconst out = { on: cmd, reason: reason, src: 'thermostat' };\nif (details) out.details = details;\nreturn { topic: 'red/appliance/' + NAME, payload: out };\n",
         "outputs": 1,
+        "timeout": "",
         "noerr": 0,
         "initialize": "",
         "finalize": "",
@@ -1139,7 +1140,7 @@
         "once": false,
         "onceDelay": 0.1,
         "topic": "red/appliance/air_conditioner/config",
-        "payload": "{\"temp_on_c\": 26, \"temp_off_c\": 25}",
+        "payload": "{\"temp_on_c\": 26.7, \"temp_off_c\": 25.5}",
         "payloadType": "json",
         "x": 170,
         "y": 1160,
@@ -1206,5 +1207,78 @@
                 "ac_thermo_config"
             ]
         ]
+    },
+    {
+        "id": "ac_gssp_comment",
+        "type": "comment",
+        "z": "ac_tab",
+        "name": "=== Dishwasher dashboard status ===",
+        "info": "",
+        "x": 210,
+        "y": 1320,
+        "wires": []
+    },
+    {
+        "id": "ac_gssp_tick",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "dishwasher status tick",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "300",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 20,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 1360,
+        "wires": [
+            [
+                "ac_gssp_status"
+            ]
+        ]
+    },
+    {
+        "id": "ac_gssp_status",
+        "type": "function",
+        "z": "ac_tab",
+        "name": "dishwasher dashboard status",
+        "func": "// Dashboard line for the dishwasher. While the machine is actually running its\n// status is republished every 5 minutes on red/status/info/gssp, so a display\n// that came up late still catches up; `hasstopic` carries the ready-made text,\n// the other fields are there for anything that renders it itself.\nfunction localIso(ms){const d=new Date(ms);const pad=n=>String(n).padStart(2,'0');const off=-d.getTimezoneOffset();const sign=off>=0?'+':'-';const oh=pad(Math.floor(Math.abs(off)/60));const om=pad(Math.abs(off)%60);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+sign+oh+':'+om;}\nconst NAME = 'dishwasher';\nconst TOPIC = 'red/status/info/gssp';\nconst LABEL = 'Geschirrsp\u00fcler';\n// The states in which the appliance is drawing power; everything else (waiting\n// for a cheap slot, off, no job at all) is not a run.\nconst RUNNING = { starting_up: 1, running: 1, waiting_for_completion: 1 };\n\n// \"noch 2 Stunden und 23 Minuten\" - same wording as `status voice`.\nfunction restlaufzeit(v) {\n  const end = typeof v === 'number' ? v : (v ? new Date(v).getTime() : NaN);\n  if (isNaN(end)) return null;\n  const total = Math.round((end - Date.now()) / 60000);\n  if (total <= 0) return null;\n  const h = Math.floor(total / 60);\n  const m = total % 60;\n  const parts = [];\n  if (h === 1) { parts.push('eine Stunde'); } else if (h > 1) { parts.push(h + ' Stunden'); }\n  if (m === 1) { parts.push('eine Minute'); } else if (m > 1) { parts.push(m + ' Minuten'); }\n  if (!parts.length) return 'weniger als eine Minute';\n  return parts.join(' und ');\n}\n\nconst job = (global.get('jobs') || {})[NAME];\nconst state = job ? job.state : null;\nconst running = !!RUNNING[state];\nconst was = flow.get('gssp_running') === true;\n\nif (!running) {\n  node.status({ fill: 'grey', shape: 'ring', text: state || 'kein Lauf' });\n  // Say once that the run is over - repeating \"ist fertig\" every five minutes\n  // tells the dashboard nothing new, and a retained message keeps it on screen.\n  if (!was) return null;\n  flow.set('gssp_running', false);\n  return {\n    topic: TOPIC,\n    retain: true,\n    payload: {\n      hasstopic: LABEL + ' ist fertig',\n      device: NAME,\n      state: state || 'off',\n      updated_at: localIso(Date.now())\n    }\n  };\n}\n\nflow.set('gssp_running', true);\nlet text;\nif (state === 'starting_up') {\n  text = LABEL + ' startet';\n} else if (state === 'waiting_for_completion') {\n  text = LABEL + ' ist fast fertig';\n} else {\n  const rest = restlaufzeit(job.predicted_end_at);\n  text = rest ? LABEL + ' l\u00e4uft noch ' + rest : LABEL + ' l\u00e4uft';\n}\nnode.status({ fill: 'green', shape: 'dot', text: text });\nreturn {\n  topic: TOPIC,\n  retain: true,\n  payload: {\n    hasstopic: text,\n    device: NAME,\n    state: state,\n    power_w: job.last_power,\n    predicted_end_at: job.predicted_end_at ? localIso(job.predicted_end_at) : null,\n    updated_at: localIso(Date.now())\n  }\n};\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 1360,
+        "wires": [
+            [
+                "ac_mqtt_out_gssp"
+            ]
+        ]
+    },
+    {
+        "id": "ac_mqtt_out_gssp",
+        "type": "mqtt out",
+        "z": "ac_tab",
+        "name": "red/status/info/gssp",
+        "topic": "",
+        "qos": "0",
+        "retain": "true",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_config",
+        "x": 740,
+        "y": 1360,
+        "wires": []
     }
 ]
