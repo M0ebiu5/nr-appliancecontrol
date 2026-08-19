@@ -872,7 +872,52 @@
             [
                 "ac_mqtt_out_status",
                 "0cfe991cf5b24cd0",
-                "ac_tele_rate"
+                "ac_tele_rate",
+                "ac_dw_press"
+            ]
+        ]
+    },
+    {
+        "id": "ac_dw_press",
+        "type": "function",
+        "z": "ac_tab",
+        "name": "dishwasher start button",
+        "func": "// The dishwasher does not start on power alone: a SwitchBot sits on the front\n// panel and presses the start button. That press has to land while the machine\n// is coming up, and only for a run that is really about to happen - the plug\n// also goes on the moment a run is requested, seconds before the scheduler may\n// switch it back off for a cheaper slot.\n//\n// `deferred_wait` is exactly that moment: the scheduler (or `resume after\n// defer`) has cleared the run and the outlet is on, but nothing is drawing\n// yet. The delay behind this node gives the panel its five seconds.\nlet p = msg.payload;\nif (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { return null; } }\nif (!p || p.device !== 'dishwasher' || p.state !== 'deferred_wait') return null;\nnode.status({ fill: 'green', shape: 'dot', text: 'Start um ' + new Date().toLocaleTimeString() });\nreturn { topic: 'z2m/0xa4c138301fb88a4a/set', payload: JSON.stringify({ state: 'ON' }) };\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1010,
+        "y": 80,
+        "wires": [
+            [
+                "ac_dw_press_delay"
+            ]
+        ]
+    },
+    {
+        "id": "ac_dw_press_delay",
+        "type": "delay",
+        "z": "ac_tab",
+        "name": "wait 5 s for the panel",
+        "pauseType": "delay",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "outputs": 1,
+        "x": 1220,
+        "y": 80,
+        "wires": [
+            [
+                "ac_mqtt_out_switch"
             ]
         ]
     },
