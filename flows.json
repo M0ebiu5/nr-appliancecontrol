@@ -1542,7 +1542,8 @@
         "wires": [
             [
                 "ac_mqtt_out_status",
-                "c4d47505b35cd5ea"
+                "c4d47505b35cd5ea",
+                "ac_speak"
             ]
         ]
     },
