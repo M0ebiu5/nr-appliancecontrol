@@ -906,7 +906,8 @@
                 "ac_tele_rate",
                 "ac_dw_press",
                 "ac_gssp_status",
-                "ac_wama_status"
+                "ac_wama_status",
+                "ac_speak"
             ]
         ]
     },
@@ -967,7 +968,7 @@
         "targetType": "full",
         "statusVal": "",
         "statusType": "auto",
-        "x": 1150,
+        "x": 1220,
         "y": 300,
         "wires": []
     },
@@ -1509,5 +1510,133 @@
         "x": 830,
         "y": 1560,
         "wires": []
+    },
+    {
+        "id": "8d5f8852a41eff5c",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            },
+            {
+                "p": "payload"
+            },
+            {
+                "p": "retain",
+                "v": "true",
+                "vt": "bool"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "red/status/info/appliance",
+        "payload": "{\"state\":\"completed\",\"reason\":\"completion_detected\",\"device\":\"dishwasher\",\"completed_at\":\"2026-08-22T11:14:00+02:00\",\"voicetext\":\"Geschirrspüler ist fertig\"}",
+        "payloadType": "json",
+        "x": 1100,
+        "y": 620,
+        "wires": [
+            [
+                "ac_mqtt_out_status",
+                "c4d47505b35cd5ea"
+            ]
+        ]
+    },
+    {
+        "id": "c4d47505b35cd5ea",
+        "type": "debug",
+        "z": "ac_tab",
+        "name": "debug 8",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "fd3b212708d1f88e",
+        "type": "api-call-service",
+        "z": "ac_tab",
+        "name": "tts.speak",
+        "server": "ac_ha_server",
+        "version": 7,
+        "debugenabled": false,
+        "action": "tts.speak",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [
+            "tts.edge_tts"
+        ],
+        "labelId": [],
+        "data": "{\t   \"cache\": true,\t   \"media_player_entity_id\": \"media_player.vaca_6ceb3291d_mediaplayer\",\t   \"message\": payload,\t   \"language\": \"de-AT-IngridNeural\"\t}",
+        "dataType": "jsonata",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "queue": "none",
+        "blockInputOverrides": true,
+        "domain": "tts",
+        "service": "speak",
+        "x": 1240,
+        "y": 700,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "fce4aeb89665763b",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "Test",
+        "payloadType": "str",
+        "x": 1030,
+        "y": 700,
+        "wires": [
+            [
+                "fd3b212708d1f88e"
+            ]
+        ]
+    },
+    {
+        "id": "ac_speak",
+        "type": "function",
+        "z": "ac_tab",
+        "name": "speak",
+        "func": "// `status voice` builds the German sentence; this is the only thing that says it\n// out loud. A status without a spoken form - a state the voice node has no\n// phrase for, or an appliance it does not name - is not worth a TTS call, so it\n// stops here rather than reaching the speaker as an empty utterance.\nconst p = msg.payload;\nif (!p || typeof p !== 'object' || !p.voicetext) return null;\nmsg.payload = p.voicetext;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1030,
+        "y": 560,
+        "wires": [
+            [
+                "fd3b212708d1f88e"
+            ]
+        ]
     }
 ]
