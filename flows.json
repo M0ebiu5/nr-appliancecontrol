@@ -1565,6 +1565,39 @@
         "wires": []
     },
     {
+        "id": "ac_speak_clear",
+        "type": "api-call-service",
+        "z": "ac_tab",
+        "name": "clear stuck stream",
+        "server": "ac_ha_server",
+        "version": 7,
+        "debugenabled": false,
+        "action": "media_player.media_stop",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [
+            "media_player.vaca_6ceb3291d_mediaplayer"
+        ],
+        "labelId": [],
+        "data": "",
+        "dataType": "jsonata",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "queue": "none",
+        "blockInputOverrides": true,
+        "domain": "media_player",
+        "service": "media_stop",
+        "x": 1130,
+        "y": 630,
+        "wires": [
+            [
+                "fd3b212708d1f88e"
+            ]
+        ]
+    },
+    {
         "id": "fd3b212708d1f88e",
         "type": "api-call-service",
         "z": "ac_tab",
@@ -1616,7 +1649,7 @@
         "y": 700,
         "wires": [
             [
-                "fd3b212708d1f88e"
+                "ac_speak_clear"
             ]
         ]
     },
@@ -1636,7 +1669,7 @@
         "y": 560,
         "wires": [
             [
-                "fd3b212708d1f88e"
+                "ac_speak_clear"
             ]
         ]
     }
