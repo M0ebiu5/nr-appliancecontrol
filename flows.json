@@ -1669,8 +1669,38 @@
         "y": 560,
         "wires": [
             [
-                "ac_speak_clear"
+                "ac_speak_clear",
+                "ac_speak_echo"
             ]
+        ]
+    },
+    {
+        "id": "ac_speak_echo",
+        "type": "api-call-service",
+        "z": "ac_tab",
+        "name": "Echo Kueche (Amazon name: Kinderzimmer Marlon)",
+        "server": "ac_ha_server",
+        "version": 7,
+        "debugenabled": false,
+        "action": "notify.alexa_media_kinderzimmer_marlon",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [],
+        "labelId": [],
+        "data": "{\t   \"message\": payload,\t   \"data\": { \"type\": \"announce\" }\t}",
+        "dataType": "jsonata",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "queue": "none",
+        "blockInputOverrides": true,
+        "domain": "notify",
+        "service": "alexa_media_kinderzimmer_marlon",
+        "x": 1230,
+        "y": 490,
+        "wires": [
+            []
         ]
     }
 ]
