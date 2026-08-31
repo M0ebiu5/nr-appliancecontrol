@@ -1660,7 +1660,7 @@
         "type": "function",
         "z": "ac_tab",
         "name": "speak",
-        "func": "// `status voice` builds the German sentence; this is the only thing that says it\n// out loud. A status without a spoken form - a state the voice node has no\n// phrase for, or an appliance it does not name - is not worth a TTS call, so it\n// stops here rather than reaching the speaker as an empty utterance.\nconst p = msg.payload;\nif (!p || typeof p !== 'object' || !p.voicetext) return null;\n// Flattening to the bare sentence loses which appliance it was about, and the\n// Technik speaker is only there for the washing machine. Carry the key along.\nmsg.ac_device = p.device;\nmsg.payload = p.voicetext;\nreturn msg;\n",
+        "func": "// `status voice` builds the German sentence; this is the only thing that says it\n// out loud. A status without a spoken form - a state the voice node has no\n// phrase for, or an appliance it does not name - is not worth a TTS call, so it\n// stops here rather than reaching the speaker as an empty utterance.\nconst p = msg.payload;\nif (!p || typeof p !== object || !p.voicetext) return null;\nmsg.payload = p.voicetext;\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -1673,7 +1673,7 @@
             [
                 "ac_speak_clear",
                 "ac_speak_echo",
-                "ac_speak_wama_only"
+                "ac_speak_technik"
             ]
         ]
     },
@@ -1707,31 +1707,6 @@
         ]
     },
     {
-        "id": "ac_speak_wama_only",
-        "type": "switch",
-        "z": "ac_tab",
-        "name": "washing machine only",
-        "property": "ac_device",
-        "propertyType": "msg",
-        "rules": [
-            {
-                "t": "eq",
-                "v": "washing_machine",
-                "vt": "str"
-            }
-        ],
-        "checkall": "true",
-        "repair": false,
-        "outputs": 1,
-        "x": 1210,
-        "y": 420,
-        "wires": [
-            [
-                "ac_speak_technik"
-            ]
-        ]
-    },
-    {
         "id": "ac_speak_technik",
         "type": "api-call-service",
         "z": "ac_tab",
@@ -1754,7 +1729,7 @@
         "blockInputOverrides": true,
         "domain": "notify",
         "service": "alexa_media_technik",
-        "x": 1450,
+        "x": 1230,
         "y": 420,
         "wires": [
             []
