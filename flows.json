@@ -1781,5 +1781,544 @@
         "wires": [
             []
         ]
+    },
+    {
+        "id": "ac_ttstest_comment",
+        "type": "comment",
+        "z": "ac_tab",
+        "name": "=== TTS device test (click a button, note which speaker answers) ===",
+        "info": "One inject per Alexa notify target plus the VACA tablet. Each announces its own number and service name, so the speaker that answers identifies the target by ear. Amazon's room names are swapped - do not trust them.\nSkipped on purpose: notify.alexa_media (all devices), _last_called, _this_device and _uberall (the everywhere group).",
+        "x": 320,
+        "y": 1660,
+        "wires": []
+    },
+    {
+        "id": "ac_ttstest_01",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "01 alexahannah",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_alexahannah\", \"data\": {\"message\": \"Test 1. alexahannah.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 1700,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_02",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "02 alexakeller",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_alexakeller\", \"data\": {\"message\": \"Test 2. alexakeller.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 1740,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_03",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "03 bad",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_bad\", \"data\": {\"message\": \"Test 3. bad.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 1780,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_04",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "04 echo_show_omaopa",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_echo_show_omaopa\", \"data\": {\"message\": \"Test 4. echo show omaopa.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 1820,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_05",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "05 garage",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_garage\", \"data\": {\"message\": \"Test 5. garage.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 1860,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_06",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "06 kinderzimmer",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_kinderzimmer\", \"data\": {\"message\": \"Test 6. kinderzimmer.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 1900,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_07",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "07 kinderzimmer_marlon",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_kinderzimmer_marlon\", \"data\": {\"message\": \"Test 7. kinderzimmer marlon.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 1940,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_08",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "08 kuche",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_kuche\", \"data\": {\"message\": \"Test 8. kuche.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 1980,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_09",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "09 kuche_alt",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_kuche_alt\", \"data\": {\"message\": \"Test 9. kuche alt.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2020,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_10",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "10 omaopa_3_echo_dot",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_omaopa_3_echo_dot\", \"data\": {\"message\": \"Test 10. omaopa 3 echo dot.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2060,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_11",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "11 schlafzimmer",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_schlafzimmer\", \"data\": {\"message\": \"Test 11. schlafzimmer.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2100,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_12",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "12 technik",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_technik\", \"data\": {\"message\": \"Test 12. technik.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2140,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_13",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "13 walter_s_19th_fire",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_walter_s_19th_fire\", \"data\": {\"message\": \"Test 13. walter s 19th fire.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2180,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_14",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "14 walter_s_2nd_fire_tv",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_walter_s_2nd_fire_tv\", \"data\": {\"message\": \"Test 14. walter s 2nd fire tv.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2220,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_15",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "15 walters_18_fire",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_walters_18_fire\", \"data\": {\"message\": \"Test 15. walters 18 fire.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2260,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_16",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "16 walters_22_fire",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_walters_22_fire\", \"data\": {\"message\": \"Test 16. walters 22 fire.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2300,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_17",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "17 walters_echo_show8",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_walters_echo_show8\", \"data\": {\"message\": \"Test 17. walters echo show8.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2340,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_18",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "18 walters_echo_show_black",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_walters_echo_show_black\", \"data\": {\"message\": \"Test 18. walters echo show black.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2380,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_19",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "19 walters_fire_tv_stick",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"notify.alexa_media_walters_fire_tv_stick\", \"data\": {\"message\": \"Test 19. walters fire tv stick.\", \"data\": {\"type\": \"announce\"}}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2420,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_20",
+        "type": "inject",
+        "z": "ac_tab",
+        "name": "20 vaca tablet (tts.speak)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"action\": \"tts.speak\", \"target\": {\"entity_id\": \"tts.edge_tts\"}, \"data\": {\"cache\": false, \"media_player_entity_id\": \"media_player.vaca_6ceb3291d_mediaplayer\", \"message\": \"Test 20. vaca tablet.\", \"language\": \"de-AT-IngridNeural\"}}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 2460,
+        "wires": [
+            [
+                "ac_ttstest_call"
+            ]
+        ]
+    },
+    {
+        "id": "ac_ttstest_call",
+        "type": "api-call-service",
+        "z": "ac_tab",
+        "name": "TTS test call (action from msg.payload)",
+        "server": "ac_ha_server",
+        "version": 7,
+        "debugenabled": false,
+        "action": "",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [],
+        "labelId": [],
+        "data": "",
+        "dataType": "json",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "queue": "none",
+        "blockInputOverrides": false,
+        "domain": "",
+        "service": "",
+        "x": 700,
+        "y": 2100,
+        "wires": [
+            []
+        ]
     }
 ]
