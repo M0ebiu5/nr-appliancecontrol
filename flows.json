@@ -1707,7 +1707,7 @@
         "type": "function",
         "z": "ac_tab",
         "name": "speak",
-        "func": "// `status voice` builds the German sentence; this is the only thing that says it\n// out loud. A status without a spoken form - a state the voice node has no\n// phrase for, or an appliance it does not name - is not worth a TTS call, so it\n// stops here rather than reaching the speaker as an empty utterance.\nconst p = msg.payload;\nif (!p || typeof p !== object || !p.voicetext) return null;\nmsg.payload = p.voicetext;\nreturn msg;",
+        "func": "// `status voice` builds the German sentence; this is the only thing that says it\n// out loud. A status without a spoken form - a state the voice node has no\n// phrase for, or an appliance it does not name - is not worth a TTS call, so it\n// stops here rather than reaching the speaker as an empty utterance.\nconst p = msg.payload;\nif (!p || typeof p !== 'object' || !p.voicetext) return null;\nmsg.payload = p.voicetext;\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
