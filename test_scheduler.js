@@ -336,23 +336,23 @@ console.log('\n[7] a deferred device blocks its own slot');
 }
 
 // ============================================================================
-// Test 8: heating elements are kept apart even when PV would pay for both
+// Test 8: sustained heating is kept apart even when PV would pay for both
 // ============================================================================
-console.log('\n[8] peaks do not overlap under full sun');
+console.log('\n[8] heating blocks do not overlap under full sun');
 {
   // Real profiles, and enough PV that the net grid figure never approaches the
   // spike limit - so only the overlap rule can separate the two elements. The
   // dishwasher is parked at 10:15, putting its first heating block at
-  // 10:29-10:41. The washing machine heats 13-35 min into its own run, so the
-  // obvious start - now, 10:00, costing nothing under this much sun - would put
-  // its element on from 10:13 to 10:35 and straight through the dishwasher's.
-  // The rule has to move it.
+  // 10:29-10:41. The washing machine holds its element on 15-38 min into its
+  // own run, so the obvious start - now, 10:00, costing nothing under this much
+  // sun - would have it heating from 10:15 to 10:38 and straight through the
+  // dishwasher's block. The rule has to move it.
   const realCfg = JSON.parse(JSON.stringify(baseCfg));
   realCfg.spike_limit_w = 2000;
-  realCfg.overlap_peak_w = 1000;
+  realCfg.overlap_sustained_w = 1000;
   realCfg.appliances = {
     dishwasher: { draw_profile: [[0, 40], [14, 1700], [26, 45], [104, 1700], [110, 40], [120, 12], [149, 2]] },
-    washing_machine: { draw_profile: [[0, 25, 110], [13, 1045, 1780], [35, 365, 1790], [65, 145, 1760], [110, 105, 180], [170, 105, 440], [230, 0, 0]] },
+    washing_machine: { draw_profile: [[0, 31, 114], [15, 1143, 1778], [38, 347, 1787], [50, 255, 1768], [62, 143, 1759], [110, 96, 179], [170, 97, 460], [230, 0, 0]] },
   };
   const dwStart = ts('2026-04-14T10:15:00+02:00');
   const dw = {
@@ -383,25 +383,27 @@ console.log('\n[8] peaks do not overlap under full sun');
     pv_curve: sunny,
     ess_pac: 4000,
   });
-  // Minutes at or above the overlap threshold, as absolute time windows.
-  const spikes = (start, profile) => {
+  // Minutes of sustained heating, as absolute times. Mean, not peak: the
+  // washing machine's reheat bursts touch 1780 W but the element is only on
+  // for about half of any two minutes, and the rule deliberately lets those
+  // share a slot - spike_limit_w covers them instead.
+  const heating = (start, profile) => {
     const out = [];
     for (let m = 0; m < 240; m++) {
       let st = profile[0];
       for (const step of profile) { if (m >= step[0]) st = step; else break; }
-      const pk = st.length > 2 ? st[2] : st[1];
-      if (pk > 1000) out.push(start + m * 60000);
+      if (st[1] > 1000) out.push(start + m * 60000);
     }
     return out;
   };
-  const dwSpikes = new Set(spikes(dwStart, realCfg.appliances.dishwasher.draw_profile));
-  const wmSpikes = spikes(ts(r.scheduled_at), realCfg.appliances.washing_machine.draw_profile);
+  const dwSpikes = new Set(heating(dwStart, realCfg.appliances.dishwasher.draw_profile));
+  const wmSpikes = heating(ts(r.scheduled_at), realCfg.appliances.washing_machine.draw_profile);
   const clash = wmSpikes.filter(t => dwSpikes.has(t));
   // Sanity: the scenario is only discriminating if the cheap obvious answer clashes.
-  const naive = spikes(NOW, realCfg.appliances.washing_machine.draw_profile)
+  const naive = heating(NOW, realCfg.appliances.washing_machine.draw_profile)
     .filter(t => dwSpikes.has(t));
   check('starting now would have clashed', naive.length > 0, `${naive.length} minutes`);
-  check('no minute has both elements on', clash.length === 0,
+  check('no minute has both elements held on', clash.length === 0,
     `${clash.length} overlapping minutes from ${r.scheduled_at}`);
 }
 
