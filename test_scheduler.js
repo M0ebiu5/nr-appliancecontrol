@@ -65,7 +65,7 @@ function runScenario(deviceName, params) {
   }
   if (!result) return { decision: 'null', reason: 'null', raw: null };
   const [switchMsg, delayMsg, statusMsg] = result;
-  const status = JSON.parse(statusMsg.payload);
+  const status = typeof statusMsg.payload === 'string' ? JSON.parse(statusMsg.payload) : statusMsg.payload;
   return { decision: status.state, reason: status.reason, status, switchMsg, delayMsg, scheduled_at: status.scheduled_at };
 }
 
@@ -175,18 +175,19 @@ console.log('\n[3] cheaper later');
 }
 
 // ============================================================================
-// Test 4: spike limit blocks running now (other device already running)
+// Test 4: a device already drawing blocks the slots it overlaps - and only those
 // ============================================================================
-console.log('\n[4] spike limit forces deferral');
+console.log('\n[4] spike limit forces deferral past the running device');
 {
-  // washing_machine drawing 2500W is running; dishwasher needs 2000W; PV=0
-  // → otherPower+load = 4500W > spike_limit 4000W → cannot run now
-  // future slots also conflict, so defer to first slot where wm finishes (we'll
-  // simulate by removing wm via lower spike via... no, easier: keep wm running
-  // and verify decision == deferred).
+  // washing_machine draws 2500 W for its remaining 60 min; the dishwasher needs
+  // 2000 W and PV is 0, so 4500 W > spike_limit 4000 W for as long as the two
+  // would run together. The dishwasher has to wait until the washing machine is
+  // done - it must not be forced to run now on top of it, which is what the old
+  // flat-forever otherPower made it do.
   const wm = {
     name: 'washing_machine',
     state: 'running',
+    started_at: NOW,
     deadline: ts('2026-04-14T20:00:00+02:00'),
     estimated_runtime_min: 60,
     max_power_w: 2500,
@@ -203,12 +204,13 @@ console.log('\n[4] spike limit forces deferral');
     pv_curve: new Array(24).fill(0),
     ess_pac: 0,
   });
-  // With wm "running" forever in this snapshot, no slot is viable → no_viable_slot → run_now.
-  // We just want to confirm the spike check is firing. The path is run_now/no_viable_slot.
-  check('reason indicates spike conflict (no_viable_slot)', r.reason === 'no_viable_slot',
-    `got ${r.reason}`);
+  check('decision == deferred', r.decision === 'deferred', `got ${r.decision}`);
+  check('not forced to run now', r.reason !== 'no_viable_slot', `got ${r.reason}`);
+  check('starts after the washing machine finishes',
+    ts(r.scheduled_at) >= NOW + 60 * 60000, `got ${r.scheduled_at}`);
 }
 
+// ============================================================================
 // ============================================================================
 // Test 5: 15-min slot alignment + cost integration across price boundary
 // ============================================================================
@@ -293,5 +295,115 @@ console.log('\n[6] defer for midday PV cover');
 // ============================================================================
 // Summary
 // ============================================================================
+// ============================================================================
+// Test 7: a job that is only booked, not yet drawing, still occupies its slot
+// ============================================================================
+console.log('\n[7] a deferred device blocks its own slot');
+{
+  // The washing machine is parked on 11:00 and has never drawn a watt. Power is
+  // dear until 11:00 and cheap from then on, so the dishwasher wants exactly
+  // that slot - but 2500 + 2000 W with no PV is over the 4000 W limit, so it has
+  // to take the first cheap slot the washing machine has vacated instead. Before
+  // parked jobs were counted, both machines booked 11:00 and started together.
+  const wm = {
+    name: 'washing_machine',
+    state: 'deferred',
+    scheduled_at: ts('2026-04-14T11:00:00+02:00'),
+    deadline: ts('2026-04-14T20:00:00+02:00'),
+    estimated_runtime_min: 60,
+    max_power_w: 2500,
+    last_power: 0,
+    defer_count: 1,
+  };
+  const dw = baseDevice({ max_power_w: 2000, estimated_runtime_min: 60, state: 'requested' });
+  const prices = [];
+  for (let i = 0; i < 48; i++) {
+    const t = NOW + i * SLOT_MS;
+    prices.push({ time: new Date(t).toISOString(), price: t >= ts('2026-04-14T11:00:00+02:00') ? 0.05 : 0.40 });
+  }
+  const r = runScenario('dishwasher', {
+    now: NOW,
+    jobs: { washing_machine: wm, dishwasher: dw },
+    cfg: baseCfg,
+    price_now: 0.40,
+    price_forecast: prices,
+    pv_curve: new Array(24).fill(0),
+    ess_pac: 0,
+  });
+  check('decision == deferred', r.decision === 'deferred', `got ${r.decision}`);
+  check('does not share the 11:00 slot', ts(r.scheduled_at) >= ts('2026-04-14T12:00:00+02:00'),
+    `got ${r.scheduled_at}`);
+}
+
+// ============================================================================
+// Test 8: heating elements are kept apart even when PV would pay for both
+// ============================================================================
+console.log('\n[8] peaks do not overlap under full sun');
+{
+  // Real profiles, and enough PV that the net grid figure never approaches the
+  // spike limit - so only the overlap rule can separate the two elements. The
+  // dishwasher is parked at 10:15, putting its first heating block at
+  // 10:29-10:41. The washing machine heats 13-35 min into its own run, so the
+  // obvious start - now, 10:00, costing nothing under this much sun - would put
+  // its element on from 10:13 to 10:35 and straight through the dishwasher's.
+  // The rule has to move it.
+  const realCfg = JSON.parse(JSON.stringify(baseCfg));
+  realCfg.spike_limit_w = 2000;
+  realCfg.overlap_peak_w = 1000;
+  realCfg.appliances = {
+    dishwasher: { draw_profile: [[0, 40], [14, 1700], [26, 45], [104, 1700], [110, 40], [120, 12], [149, 2]] },
+    washing_machine: { draw_profile: [[0, 25, 110], [13, 1045, 1780], [35, 365, 1790], [65, 145, 1760], [110, 105, 180], [170, 105, 440], [230, 0, 0]] },
+  };
+  const dwStart = ts('2026-04-14T10:15:00+02:00');
+  const dw = {
+    name: 'dishwasher',
+    state: 'deferred',
+    scheduled_at: dwStart,
+    deadline: ts('2026-04-14T23:00:00+02:00'),
+    estimated_runtime_min: 195,
+    max_power_w: 1700,
+    last_power: 0,
+    defer_count: 1,
+  };
+  const wm = baseDevice({
+    name: 'washing_machine',
+    state: 'requested',
+    deadline: ts('2026-04-15T02:00:00+02:00'),
+    estimated_runtime_min: 230,
+    max_power_w: 1790,
+  });
+  const sunny = new Array(24).fill(0);
+  for (let h = 6; h <= 20; h++) sunny[h] = 4000;
+  const r = runScenario('washing_machine', {
+    now: NOW,
+    jobs: { dishwasher: dw, washing_machine: wm },
+    cfg: realCfg,
+    price_now: 0.20,
+    price_forecast: mkForecast('2026-04-14T10:00:00+02:00', new Array(96).fill(0.20)),
+    pv_curve: sunny,
+    ess_pac: 4000,
+  });
+  // Minutes at or above the overlap threshold, as absolute time windows.
+  const spikes = (start, profile) => {
+    const out = [];
+    for (let m = 0; m < 240; m++) {
+      let st = profile[0];
+      for (const step of profile) { if (m >= step[0]) st = step; else break; }
+      const pk = st.length > 2 ? st[2] : st[1];
+      if (pk > 1000) out.push(start + m * 60000);
+    }
+    return out;
+  };
+  const dwSpikes = new Set(spikes(dwStart, realCfg.appliances.dishwasher.draw_profile));
+  const wmSpikes = spikes(ts(r.scheduled_at), realCfg.appliances.washing_machine.draw_profile);
+  const clash = wmSpikes.filter(t => dwSpikes.has(t));
+  // Sanity: the scenario is only discriminating if the cheap obvious answer clashes.
+  const naive = spikes(NOW, realCfg.appliances.washing_machine.draw_profile)
+    .filter(t => dwSpikes.has(t));
+  check('starting now would have clashed', naive.length > 0, `${naive.length} minutes`);
+  check('no minute has both elements on', clash.length === 0,
+    `${clash.length} overlapping minutes from ${r.scheduled_at}`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
