@@ -7,37 +7,6 @@
         "info": "Controls dishwasher, washing machine and air conditioner via MQTT-switched\npower outlets. Optimizes for electricity price, avoids grid-import spikes\nand prefers PV self-consumption (4500 Wp array).\n\nReuses existing configs:\n  MQTT broker    mqtt_broker_config (192.168.4.221)\n  InfluxDB live  influxdb_config_infra (measurement pv, field PAC)\n  InfluxDB 2y    influxdb_config_infra_2y (measurement pv, field mean_PAC)\n\nDevice wiring:\n  washing_machine  Zigbee2MQTT  z2m/0x70b3d52b6013d856        payload.power W\n                                z2m/0x70b3d52b6013d856/set    {state:ON|OFF}\n  dishwasher       Tasmota      tm/tele/OgKuGsp/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgKuGsp/POWER1        ON|OFF  (POWER2 = USB outlet)\n  air_conditioner  Tasmota      tm/tele/OgWzKli/SENSOR        ENERGY.Power W\n                                tm/cmnd/OgWzKli/POWER         ON|OFF\n\nUser API (MQTT):\n  red/appliance/<name>            true  = start the appliance flow\n                                  false = switch the outlet off and drop the job\n                                  JSON {on?, reason?, deadline?, estimated_runtime_min?,\n                                        max_defer_hours?, max_power_w?}\n                                        = start, or stop when on is false, with per-request\n                                        overrides; reason replaces the one in the status message\n  home/appliance/<name>/status    retained JSON {state, scheduled_at, runtime_min, reason, ...}\n\nName must be one of: washing_machine, dishwasher, air_conditioner.\n\nPer-appliance defaults (runtime_min, max_defer_hours, max_power_w) live in\n`ac_init_fn` under cfg.appliances.<name>. Any field in the start payload\noverrides the default. If deadline is omitted it is derived from\n`requested_at + max_defer_hours + runtime_min`.\n\nThe air conditioner is not started by hand: `ac_thermostat` polls every minute\nand issues the same start/stop commands from the inside temperature\n(global `weather.eco_in`, file store) and the live PV power (global `ess.pac`).\nIt gives up on cooling while the outside temperature (`weather.temp`) is low enough\nto air out instead.\nThresholds live in cfg.ac_thermostat.\nSwitching it off by hand blocks automatic starts until the next day.\n  red/appliance/air_conditioner/config   {temp_on_c?, temp_off_c?} | <number> = temp_on_c | default\n                                  = change the thermostat temperatures at runtime\n\nAn appliance that never draws power after its outlet was switched on is given\nup on after cfg.startup_timeout_min and the outlet goes off again.\n\nNOTE: Tasmota's default TelePeriod (300s) is too slow for responsive\nstartup detection. Set TelePeriod to ~10s on OgKuGsp and OgWzKli, or the\nscheduler won't see the first power spike for up to five minutes."
     },
     {
-        "id": "ac_ha_server",
-        "type": "server",
-        "z": "ac_tab",
-        "name": "Home Assistant",
-        "version": 6,
-        "addon": false,
-        "rejectUnauthorizedCerts": true,
-        "ha_boolean": [
-            "y",
-            "yes",
-            "true",
-            "on",
-            "home",
-            "open"
-        ],
-        "connectionDelay": true,
-        "cacheJson": true,
-        "heartbeat": false,
-        "heartbeatInterval": 30,
-        "areaSelector": "friendlyName",
-        "deviceSelector": "friendlyName",
-        "entitySelector": "friendlyName",
-        "statusSeparator": "at: ",
-        "statusYear": "hidden",
-        "statusMonth": "short",
-        "statusDay": "numeric",
-        "statusHourCycle": "h23",
-        "statusTimeFormat": "h:m",
-        "enableGlobalContextStore": false
-    },
-    {
         "id": "ac_changelog",
         "type": "comment",
         "z": "ac_tab",
@@ -102,7 +71,7 @@
         "topic": "red/appliance/+",
         "qos": "0",
         "datatype": "json",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "nl": false,
         "rap": false,
         "inputs": 0,
@@ -178,7 +147,7 @@
         "topic": "z2m/0x70b3d52b6013d856",
         "qos": "0",
         "datatype": "json",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "inputs": 0,
         "x": 160,
         "y": 240,
@@ -196,7 +165,7 @@
         "topic": "tm/tele/OgKuGsp/SENSOR",
         "qos": "0",
         "datatype": "json",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "inputs": 0,
         "x": 180,
         "y": 280,
@@ -215,7 +184,7 @@
         "topic": "tm/tele/OgWzKli/SENSOR",
         "qos": "0",
         "datatype": "json",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "inputs": 0,
         "x": 190,
         "y": 320,
@@ -426,7 +395,7 @@
         "topic": "home/energy/price",
         "qos": "0",
         "datatype": "auto",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "inputs": 0,
         "x": 150,
         "y": 640,
@@ -457,7 +426,7 @@
         "topic": "home/energy/price_forecast",
         "qos": "0",
         "datatype": "json",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "inputs": 0,
         "x": 140,
         "y": 540,
@@ -560,7 +529,7 @@
         "topic": "",
         "qos": "0",
         "retain": "false",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "x": 1010,
         "y": 140,
         "wires": []
@@ -590,7 +559,7 @@
         "topic": "",
         "qos": "0",
         "retain": "true",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "x": 1240,
         "y": 240,
         "wires": []
@@ -1168,7 +1137,7 @@
         "userProps": "",
         "correl": "",
         "expiry": "",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "x": 1240,
         "y": 360,
         "wires": []
@@ -1308,7 +1277,7 @@
         "topic": "red/appliance/air_conditioner/config",
         "qos": "0",
         "datatype": "auto-detect",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "nl": false,
         "rap": true,
         "rh": 0,
@@ -1496,7 +1465,7 @@
         "userProps": "",
         "correl": "",
         "expiry": "",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "x": 740,
         "y": 1360,
         "wires": []
@@ -1641,7 +1610,7 @@
         "userProps": "",
         "correl": "",
         "expiry": "",
-        "broker": "mqtt_broker_config",
+        "broker": "mon_broker_config",
         "x": 830,
         "y": 1560,
         "wires": []
@@ -1703,6 +1672,7 @@
         "id": "ac_speak_clear",
         "type": "api-call-service",
         "z": "ac_tab",
+        "d": true,
         "name": "clear stuck stream",
         "server": "ac_ha_server",
         "version": 7,
@@ -1728,15 +1698,15 @@
         "y": 630,
         "wires": [
             [
-                "fd3b212708d1f88e"
+                "9c0f09d1fb4ca1e5"
             ]
-        ],
-        "d": true
+        ]
     },
     {
-        "id": "fd3b212708d1f88e",
+        "id": "9c0f09d1fb4ca1e5",
         "type": "api-call-service",
         "z": "ac_tab",
+        "d": true,
         "name": "tts.speak",
         "server": "ac_ha_server",
         "version": 7,
@@ -1762,8 +1732,7 @@
         "y": 700,
         "wires": [
             []
-        ],
-        "d": true
+        ]
     },
     {
         "id": "fce4aeb89665763b",
