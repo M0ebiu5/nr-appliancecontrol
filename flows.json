@@ -153,7 +153,8 @@
         "y": 240,
         "wires": [
             [
-                "ac_power_parse"
+                "ac_power_parse",
+                "ac_outlet_restore"
             ]
         ]
     },
@@ -2451,6 +2452,47 @@
             [
                 "ac_mqtt_out_switch",
                 "ac_dw_retry_wait"
+            ]
+        ]
+    },
+    {
+        "id": "ac_mqtt_in_relay",
+        "type": "mqtt in",
+        "z": "ac_tab",
+        "name": "tasmota relay STATE",
+        "topic": "tm/tele/+/STATE",
+        "qos": "0",
+        "datatype": "json",
+        "broker": "mon_broker_config",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 190,
+        "y": 500,
+        "wires": [
+            [
+                "ac_outlet_restore"
+            ]
+        ]
+    },
+    {
+        "id": "ac_outlet_restore",
+        "type": "function",
+        "z": "ac_tab",
+        "name": "outlet back on after outage",
+        "func": "// After a power cut each plug comes back in whatever state it restores to, and\n// that is not always the state the run needs. On 2026-11-06 the house lost\n// power at 07:45 mid-wash; the dishwasher plug had PowerOnState 3 (restore)\n// but SaveData 0, so it restored a stale OFF. Node-RED was down until 11:03,\n// and when it came back `power monitor` read the 0 W as the programme ending\n// and would have called the half-washed load finished.\n//\n// So the relay state the plugs report (Tasmota tele/STATE every TelePeriod,\n// the z2m plug on every message) is checked against the job: an appliance\n// whose job still needs power gets its outlet switched back on. A machine cut\n// mid-programme resumes when power returns. Jobs the flow has deliberately\n// switched off (deferred, completed, cancelled) are not in NEEDS_POWER.\nconst NEEDS_POWER = {\n  requested: true, preparing: true, deferred_wait: true,\n  starting_up: true, running: true, waiting_for_completion: true\n};\nconst topic = msg.topic || '';\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\nlet name = null, relay = null;\nif (topic === 'z2m/0x70b3d52b6013d856') { name = 'washing_machine'; relay = p.state; }\nelse if (topic === 'tm/tele/OgKuGsp/STATE') { name = 'dishwasher'; relay = p.POWER1; }\nelse if (topic === 'tm/tele/OgWzKli/STATE') { name = 'air_conditioner'; relay = p.POWER || p.POWER1; }\nif (!name || relay !== 'OFF') return null;\n\nconst dev = (global.get('jobs', 'file') || {})[name];\nif (!dev || !NEEDS_POWER[dev.state]) return null;\n\n// The z2m plug reports every 30 s; one ON is enough until it has had time to act.\nconst sent = context.get('sent') || {};\nif (Date.now() - (sent[name] || 0) < 120000) return null;\nsent[name] = Date.now();\ncontext.set('sent', sent);\n\nnode.warn(name + ': outlet reported OFF while the job is ' + dev.state + ', switching it back on');\nnode.status({ fill: 'yellow', shape: 'dot', text: name + ' back on ' + new Date().toLocaleTimeString() });\nreturn { topic: 'home/outlet/' + name + '/set', payload: 'ON' };\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 470,
+        "y": 500,
+        "wires": [
+            [
+                "ac_switch_router"
             ]
         ]
     }
